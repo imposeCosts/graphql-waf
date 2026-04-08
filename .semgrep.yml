@@ -1,0 +1,15 @@
+rules:
+  # --- Local project-specific rules (high-signal) ---
+  - id: graphql-waf-no-logs-with-secrets
+    languages: [rust]
+    severity: WARNING
+    message: "Avoid logging Authorization or raw request bodies."
+    patterns:
+      - pattern-either:
+          - pattern: info!(..., $X, ...)
+          - pattern: warn!(..., $X, ...)
+          - pattern: error!(..., $X, ...)
+      - metavariable-regex:
+          metavariable: $X
+          regex: '(?i)authorization|cookie|set-cookie|request_body|body_bytes'
+

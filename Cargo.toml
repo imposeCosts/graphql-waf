@@ -1,0 +1,27 @@
+[package]
+name = "graphql-waf"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+clap = { version = "4", features = ["derive", "env"] }
+glob = "0.3"
+http = "0.2"
+hyper = { version = "0.14", features = ["client", "http1", "http2", "server", "tcp"] }
+hyper-tls = "0.5"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+url = "2"
+wirefilter-engine = "0.6"
+zentinel-modsec = "0.1"
+serde_json = "1"
+memchr = "2"
+graphql-parser = "0.4"
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+percent-encoding = "2"
+

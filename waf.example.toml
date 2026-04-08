@@ -1,0 +1,24 @@
+[waf]
+listen_host = "127.0.0.1"
+listen_port = 8080
+upstream = "http://127.0.0.1:4000"
+mode = "block" # off|audit|block
+max_body_bytes = 1048576
+worker_threads = 4
+# Optional
+# modsec_rules = ["rules/modsec-example.conf"]
+# wirefilter = 'http.method == "POST" && http.request.uri.path contains "graphql"'
+
+[graphql]
+enabled = true
+block_introspection = true
+# allow_introspection_header = "X-GoTestWAF-Test"
+block_batch = false
+
+# Optional limits (tune for your environment)
+# max_query_bytes = 8192
+# max_depth = 20
+# max_aliases = 50
+# max_directives = 50
+# max_cost = 200
+
