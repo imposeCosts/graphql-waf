@@ -1,0 +1,12 @@
+payload:
+ - ' aaa '
+ - '1e1 union select users from password'
+encoder:
+ - Plain
+placeholder:
+ - RawRequest:
+     method: "CUST"
+     path: "/"
+     body: |
+      {{payload}}
+type: REST non-CRUD

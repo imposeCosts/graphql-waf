@@ -7,6 +7,7 @@ max_body_bytes = 1048576
 worker_threads = 4
 # Optional
 # modsec_rules = ["rules/modsec-example.conf"]
+# Wirefilter: see rules/wirefilter.example for copy-paste expressions.
 # wirefilter = 'http.method == "POST" && http.request.uri.path contains "graphql"'
 
 [graphql]

@@ -1,0 +1,28 @@
+# Example wirefilter expressions for graphql-waf
+# -----------------------------------------------
+# The proxy does not load this file automatically. Copy one expression (no # lines)
+# into --wirefilter on the CLI or into [waf] wirefilter in your TOML config.
+#
+# Available fields (wirefilter-engine scheme):
+#   http.method
+#   http.host
+#   http.user_agent
+#   http.content_type
+#   http.request.uri.path
+#   http.request.uri.query
+#   http.request.headers.authorization
+#   http.request.headers.x_forwarded_for
+#   http.request.headers.x_real_ip
+#
+# In block mode, a true expression counts as a WAF match (request is blocked).
+
+# Only enforce extra scrutiny on GraphQL POSTs (pair with ModSecurity for bodies).
+# Example CLI:
+#   --wirefilter 'http.method == "POST" && http.request.uri.path contains "graphql"'
+http.method == "POST" && http.request.uri.path contains "graphql"
+
+# Example: path contains a segment (works for /internal, /v1/internal/foo, etc.).
+# http.request.uri.path contains "/internal"
+
+# Example: no Authorization header value on paths you treat as admin (empty string if absent).
+# http.request.uri.path contains "/admin" && http.request.headers.authorization == ""

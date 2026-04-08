@@ -19,8 +19,11 @@ GTW_BLOCK_STATUS ?= 400
 # Match either plaintext block page or JSON error body.
 # Note: avoid double quotes here because it is passed inside a double-quoted CLI argument.
 GTW_BLOCK_REGEX ?= blocked by WAF|blocked\\s*:\\s*true
-# Optional; passed as --graphqlURL when set (e.g. http://127.0.0.1:8080/graphql).
-GTW_GRAPHQL_URL ?=
+# GraphQL URL for GoTestWAF --graphqlURL (owasp-api graphql / graphql-post need a real endpoint).
+# Default: same host as WAF with /graphql (typical DVGA / Apollo path through the proxy).
+GTW_GRAPHQL_URL ?= $(WAF_URL)/graphql
+# HTTP client: use gohttp to avoid Chrome/CDP JSON decode noise in logs (IPAddressSpace errors).
+GTW_HTTP_CLIENT ?= gohttp
 GTW_EXTRA ?=
 
 help:
@@ -68,7 +71,8 @@ help:
 	@echo "  RUN_DEV_WAF_ARGS='$(RUN_DEV_WAF_ARGS)' (default args used by run-dev)"
 	@echo "  GTW_BLOCK_STATUS=400           (status code used when blocking)"
 	@echo "  GTW_BLOCK_REGEX=$(GTW_BLOCK_REGEX) (regex to detect block page/body)"
-	@echo "  GTW_GRAPHQL_URL=               (optional --graphqlURL for graphql tests)"
+	@echo "  GTW_GRAPHQL_URL=$(GTW_GRAPHQL_URL) (GoTestWAF --graphqlURL; set empty to skip GraphQL subtests)"
+	@echo "  GTW_HTTP_CLIENT=$(GTW_HTTP_CLIENT) (--httpClient; use gohttp, not chrome)"
 	@echo "  GTW_EXTRA=                     (extra gotestwaf flags)"
 
 build:
@@ -278,23 +282,26 @@ gotestwaf-scan:
 	mkdir -p "$(REPORT_DIR)"
 	docker run --rm --network="host" -v "$(PWD)/$(REPORT_DIR):/app/reports" \
 		wallarm/gotestwaf --url="$(WAF_URL)" --noEmailReport --skipWAFIdentification \
-		--skipWAFBlockCheck \
-		--blockStatusCodes="$(GTW_BLOCK_STATUS)" $(if $(GTW_BLOCK_REGEX),--blockRegex="$(GTW_BLOCK_REGEX)",) $(GTW_EXTRA)
+		--skipWAFBlockCheck --httpClient="$(GTW_HTTP_CLIENT)" \
+		--blockStatusCodes="$(GTW_BLOCK_STATUS)" $(if $(GTW_BLOCK_REGEX),--blockRegex="$(GTW_BLOCK_REGEX)",) \
+		$(if $(GTW_GRAPHQL_URL),--graphqlURL="$(GTW_GRAPHQL_URL)",) $(GTW_EXTRA)
 
 gotestwaf-scan-owasp:
 	mkdir -p "$(REPORT_DIR)"
 	docker run --rm --network="host" -v "$(PWD)/$(REPORT_DIR):/app/reports" \
 		wallarm/gotestwaf --url="$(WAF_URL)" --noEmailReport --skipWAFIdentification \
-		--skipWAFBlockCheck \
+		--skipWAFBlockCheck --httpClient="$(GTW_HTTP_CLIENT)" \
 		--blockStatusCodes="$(GTW_BLOCK_STATUS)" $(if $(GTW_BLOCK_REGEX),--blockRegex="$(GTW_BLOCK_REGEX)",) \
+		$(if $(GTW_GRAPHQL_URL),--graphqlURL="$(GTW_GRAPHQL_URL)",) \
 		--testSet=owasp $(GTW_EXTRA)
 
 gotestwaf-scan-owasp-api:
 	mkdir -p "$(REPORT_DIR)"
 	docker run --rm --network="host" -v "$(PWD)/$(REPORT_DIR):/app/reports" \
 		wallarm/gotestwaf --url="$(WAF_URL)" --noEmailReport --skipWAFIdentification \
-		--skipWAFBlockCheck \
+		--skipWAFBlockCheck --httpClient="$(GTW_HTTP_CLIENT)" \
 		--blockStatusCodes="$(GTW_BLOCK_STATUS)" $(if $(GTW_BLOCK_REGEX),--blockRegex="$(GTW_BLOCK_REGEX)",) \
+		$(if $(GTW_GRAPHQL_URL),--graphqlURL="$(GTW_GRAPHQL_URL)",) \
 		--testSet=owasp-api $(GTW_EXTRA)
 
 gotestwaf-scan-graphql:
@@ -302,7 +309,7 @@ gotestwaf-scan-graphql:
 	docker run --rm --network="host" -v "$(PWD)/$(REPORT_DIR):/app/reports" \
 		wallarm/gotestwaf --url="$(WAF_URL)" --noEmailReport --skipWAFIdentification \
 		--addDebugHeader \
-		--skipWAFBlockCheck \
+		--skipWAFBlockCheck --httpClient="$(GTW_HTTP_CLIENT)" \
 		--blockStatusCodes="$(GTW_BLOCK_STATUS)" $(if $(GTW_BLOCK_REGEX),--blockRegex="$(GTW_BLOCK_REGEX)",) \
 		--testSet=owasp-api --testCase=graphql \
 		$(if $(GTW_GRAPHQL_URL),--graphqlURL="$(GTW_GRAPHQL_URL)",) $(GTW_EXTRA)
