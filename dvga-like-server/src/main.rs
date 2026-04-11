@@ -8,6 +8,7 @@ use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
 use axum::{
     extract::{Query, State},
     http::header,
+    http::StatusCode,
     response::{Html, IntoResponse},
     routing::{get, post},
     Router,
@@ -154,10 +155,21 @@ async fn graphql_get_handler(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     Query(params): Query<HashMap<String, String>>,
-) -> GraphQLResponse {
+) -> impl IntoResponse {
     let query = params.get("query").cloned().unwrap_or_default();
+    if query.trim().is_empty() {
+        // Avoid noisy parser errors for GET /graphql without a query.
+        let body = r#"{"errors":[{"message":"missing query parameter"}]}"#;
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            body,
+        )
+            .into_response();
+    }
+
     let req = GqlRequest::new(query).data(headers);
-    state.schema.execute(req).await.into()
+    GraphQLResponse::from(state.schema.execute(req).await).into_response()
 }
 
 async fn graphiql() -> impl IntoResponse {

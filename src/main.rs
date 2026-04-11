@@ -22,7 +22,10 @@ mod config;
 mod graphql_security;
 
 use config::load_toml_config;
-use graphql_security::{evaluate_graphql_security, GraphqlSecurityConfig};
+use graphql_security::{
+    evaluate_graphql_security, looks_like_graphql_request, strip_graphql_field_suggestions,
+    GraphqlSecurityConfig,
+};
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 enum WafMode {
@@ -114,6 +117,26 @@ struct Cli {
     )]
     block_graphql_batch: Option<bool>,
 
+    /// GraphQL protection: block invalid GraphQL queries (parse failures) when a query is present.
+    #[arg(
+        long,
+        env = "WAF_GRAPHQL_BLOCK_INVALID",
+        default_missing_value = "true",
+        num_args = 0..=1
+    )]
+    graphql_block_invalid: Option<bool>,
+
+    /// GraphQL protection: allow GraphQL-over-GET requests.
+    ///
+    /// Default: false (GET is blocked when it carries a GraphQL operation).
+    #[arg(
+        long,
+        env = "WAF_GRAPHQL_ALLOW_GET",
+        default_missing_value = "true",
+        num_args = 0..=1
+    )]
+    graphql_allow_get: Option<bool>,
+
     /// GraphQL protection: maximum query document bytes (after decoding/parsing).
     #[arg(long, env = "WAF_GRAPHQL_MAX_QUERY_BYTES")]
     graphql_max_query_bytes: Option<usize>,
@@ -133,6 +156,69 @@ struct Cli {
     /// GraphQL protection: maximum computed query cost (schema-agnostic approximation).
     #[arg(long, env = "WAF_GRAPHQL_MAX_COST")]
     graphql_max_cost: Option<usize>,
+
+    /// GraphQL cost model: scalar leaf field cost.
+    #[arg(long, env = "WAF_GRAPHQL_COST_SCALAR_COST")]
+    graphql_cost_scalar_cost: Option<usize>,
+
+    /// GraphQL cost model: object field cost (field with sub-selection).
+    #[arg(long, env = "WAF_GRAPHQL_COST_OBJECT_COST")]
+    graphql_cost_object_cost: Option<usize>,
+
+    /// GraphQL cost model: multiplier applied per nesting level (e.g. 1.5).
+    #[arg(long, env = "WAF_GRAPHQL_COST_DEPTH_FACTOR")]
+    graphql_cost_depth_cost_factor: Option<f64>,
+
+    /// GraphQL cost model: treat fragments as inline (disables depth multiplier propagation through fragments).
+    #[arg(
+        long,
+        env = "WAF_GRAPHQL_COST_FLATTEN_FRAGMENTS",
+        default_missing_value = "true",
+        num_args = 0..=1
+    )]
+    graphql_cost_flatten_fragments: Option<bool>,
+
+    /// GraphQL cost model: ignore introspection fields (__schema/__type) for cost calculation.
+    #[arg(
+        long,
+        env = "WAF_GRAPHQL_COST_IGNORE_INTROSPECTION",
+        default_missing_value = "true",
+        num_args = 0..=1
+    )]
+    graphql_cost_ignore_introspection: Option<bool>,
+
+    /// GraphQL cost model: added cost when a fragment spread recurses (cycle detection).
+    #[arg(long, env = "WAF_GRAPHQL_COST_FRAGMENT_RECURSION_COST")]
+    graphql_cost_fragment_recursion_cost: Option<usize>,
+
+    /// GraphQL protection: max `variables` JSON bytes (approx; computed by re-serializing the variables value).
+    #[arg(long, env = "WAF_GRAPHQL_MAX_VARIABLES_BYTES")]
+    graphql_max_variables_bytes: Option<usize>,
+
+    /// GraphQL protection: max nesting depth of the `variables` JSON value.
+    #[arg(long, env = "WAF_GRAPHQL_MAX_VARIABLES_DEPTH")]
+    graphql_max_variables_depth: Option<usize>,
+
+    /// GraphQL protection: max total keys inside the `variables` JSON value.
+    #[arg(long, env = "WAF_GRAPHQL_MAX_VARIABLES_KEYS")]
+    graphql_max_variables_keys: Option<usize>,
+
+    /// GraphQL protection: max length of any array inside the `variables` JSON value.
+    #[arg(long, env = "WAF_GRAPHQL_MAX_VARIABLES_ARRAY_LEN")]
+    graphql_max_variables_array_len: Option<usize>,
+
+    /// GraphQL response protection: strip "Did you mean ..." field suggestions from JSON errors.
+    #[arg(
+        long,
+        env = "WAF_GRAPHQL_BLOCK_FIELD_SUGGESTIONS",
+        default_missing_value = "true",
+        num_args = 0..=1
+    )]
+    graphql_block_field_suggestions: Option<bool>,
+
+    /// GraphQL response protection: max response bytes to buffer for suggestion stripping.
+    #[arg(long, env = "WAF_GRAPHQL_MAX_RESPONSE_BYTES")]
+    graphql_max_response_bytes: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -348,6 +434,7 @@ async fn handle_request(
     } else {
         HttpBodyBytes::copy_from_slice(&body_bytes[..state.max_body_bytes])
     };
+    let is_graphql = looks_like_graphql_request(&req, &inspected_body);
 
     // WAF decisions.
     let mut matched_wirefilter = false;
@@ -424,6 +511,38 @@ async fn handle_request(
         .request(req)
         .await
         .context("upstream request failed")?;
+
+    // Response-side GraphQL protection: strip field suggestions.
+    if is_graphql && state.graphql_sec.block_field_suggestions {
+        let ct = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if ct.contains("application/json") || ct.contains("+json") {
+            if let Some(len) = resp
+                .headers()
+                .get(header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<usize>().ok())
+            {
+                if len > state.graphql_sec.max_response_bytes {
+                    return Ok(resp);
+                }
+            }
+
+            let (mut parts, body) = resp.into_parts();
+            let body_bytes = to_bytes(body).await.context("read upstream response body")?;
+            if body_bytes.len() <= state.graphql_sec.max_response_bytes {
+                if let Some(rewritten) = strip_graphql_field_suggestions(body_bytes.as_ref()) {
+                    parts.headers.remove(header::CONTENT_LENGTH);
+                    return Ok(Response::from_parts(parts, Body::from(rewritten)));
+                }
+            }
+            return Ok(Response::from_parts(parts, Body::from(body_bytes)));
+        }
+    }
 
     Ok(resp)
 }
@@ -581,6 +700,18 @@ async fn run(cli: Cli) -> Result<()> {
                 .and_then(|c| c.graphql.as_ref()?.block_batch)
         })
         .unwrap_or(false);
+    let gql_block_invalid = cli
+        .graphql_block_invalid
+        .or_else(|| {
+            file_cfg
+                .as_ref()
+                .and_then(|c| c.graphql.as_ref()?.block_invalid_query)
+        })
+        .unwrap_or(true);
+    let gql_allow_get = cli
+        .graphql_allow_get
+        .or_else(|| file_cfg.as_ref().and_then(|c| c.graphql.as_ref()?.allow_get))
+        .unwrap_or(false);
     let gql_allow_introspection_header =
         cli.graphql_allow_introspection_header.clone().or_else(|| {
             file_cfg
@@ -610,6 +741,66 @@ async fn run(cli: Cli) -> Result<()> {
     let gql_max_cost = cli
         .graphql_max_cost
         .or_else(|| file_cfg.as_ref().and_then(|c| c.graphql.as_ref()?.max_cost));
+    let gql_cost_scalar_cost = cli.graphql_cost_scalar_cost.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.cost_scalar_cost)
+    });
+    let gql_cost_object_cost = cli.graphql_cost_object_cost.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.cost_object_cost)
+    });
+    let gql_cost_depth_cost_factor = cli.graphql_cost_depth_cost_factor.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.cost_depth_cost_factor)
+    });
+    let gql_cost_flatten_fragments = cli.graphql_cost_flatten_fragments.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.cost_flatten_fragments)
+    });
+    let gql_cost_ignore_introspection = cli.graphql_cost_ignore_introspection.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.cost_ignore_introspection)
+    });
+    let gql_cost_fragment_recursion_cost = cli.graphql_cost_fragment_recursion_cost.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.cost_fragment_recursion_cost)
+    });
+    let gql_max_variables_bytes = cli.graphql_max_variables_bytes.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.max_variables_bytes)
+    });
+    let gql_max_variables_depth = cli.graphql_max_variables_depth.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.max_variables_depth)
+    });
+    let gql_max_variables_keys = cli.graphql_max_variables_keys.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.max_variables_keys)
+    });
+    let gql_max_variables_array_len = cli.graphql_max_variables_array_len.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.max_variables_array_len)
+    });
+    let gql_block_field_suggestions = cli.graphql_block_field_suggestions.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.block_field_suggestions)
+    });
+    let gql_max_response_bytes = cli.graphql_max_response_bytes.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.max_response_bytes)
+    });
 
     let state = AppState {
         mode,
@@ -622,12 +813,26 @@ async fn run(cli: Cli) -> Result<()> {
             enabled: gql_enabled,
             block_introspection: gql_block_introspection,
             allow_introspection_header: gql_allow_introspection_header,
+            allow_get: gql_allow_get,
             max_query_bytes: gql_max_query_bytes,
             max_depth: gql_max_depth,
             max_aliases: gql_max_aliases,
             max_directives: gql_max_directives,
             max_cost: gql_max_cost,
+            cost_scalar_cost: gql_cost_scalar_cost.unwrap_or(1),
+            cost_object_cost: gql_cost_object_cost.unwrap_or(2),
+            cost_depth_cost_factor: gql_cost_depth_cost_factor.unwrap_or(1.5),
+            cost_flatten_fragments: gql_cost_flatten_fragments.unwrap_or(false),
+            cost_ignore_introspection: gql_cost_ignore_introspection.unwrap_or(true),
+            cost_fragment_recursion_cost: gql_cost_fragment_recursion_cost.unwrap_or(1000),
+            max_variables_bytes: gql_max_variables_bytes,
+            max_variables_depth: gql_max_variables_depth,
+            max_variables_keys: gql_max_variables_keys,
+            max_variables_array_len: gql_max_variables_array_len,
             block_batch: gql_block_batch,
+            block_invalid_query: gql_block_invalid,
+            block_field_suggestions: gql_block_field_suggestions.unwrap_or(true),
+            max_response_bytes: gql_max_response_bytes.unwrap_or(256 * 1024),
         },
     };
 
