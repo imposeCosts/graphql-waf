@@ -24,6 +24,7 @@ pub struct WafSection {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct GraphqlSection {
     pub enabled: Option<bool>,
+    pub block_non_graphql_paths: Option<bool>,
     pub block_introspection: Option<bool>,
     pub allow_introspection_header: Option<String>,
     pub allow_get: Option<bool>,

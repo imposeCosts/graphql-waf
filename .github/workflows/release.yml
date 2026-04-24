@@ -40,12 +40,33 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build release binaries
+      - name: Build release binaries (linux-amd64)
         if: steps.tag.outputs.exists != 'true'
         run: |
           set -euo pipefail
           cargo build --release --all-features
           cargo build --release --all-features --manifest-path dvga-like-server/Cargo.toml
+
+      - name: Build release binaries (linux-arm64)
+        if: steps.tag.outputs.exists != 'true'
+        uses: uraimo/run-on-arch-action@v2
+        with:
+          arch: aarch64
+          distro: ubuntu22.04
+          githubToken: ${{ github.token }}
+          install: |
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              ca-certificates curl build-essential pkg-config libssl-dev python3
+          run: |
+            set -euo pipefail
+            curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+            . "$HOME/.cargo/env"
+            rustup toolchain install stable
+            rustup default stable
+            export CARGO_TARGET_DIR=target-arm64
+            cargo build --release --all-features
+            cargo build --release --all-features --manifest-path dvga-like-server/Cargo.toml
 
       - name: Package artifacts
         if: steps.tag.outputs.exists != 'true'
@@ -54,6 +75,8 @@ jobs:
           mkdir -p dist
           cp target/release/graphql-waf "dist/graphql-waf-linux-amd64"
           cp dvga-like-server/target/release/dvga-like-server "dist/dvga-like-server-linux-amd64"
+          cp target-arm64/release/graphql-waf "dist/graphql-waf-linux-arm64"
+          cp target-arm64/release/dvga-like-server "dist/dvga-like-server-linux-arm64"
           (cd dist && sha256sum * > SHA256SUMS.txt)
 
       - name: Create and push git tag
@@ -75,5 +98,7 @@ jobs:
           generate_release_notes: true
           files: |
             dist/graphql-waf-linux-amd64
+            dist/graphql-waf-linux-arm64
             dist/dvga-like-server-linux-amd64
+            dist/dvga-like-server-linux-arm64
             dist/SHA256SUMS.txt

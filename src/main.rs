@@ -104,6 +104,15 @@ struct Cli {
     )]
     graphql_security: Option<bool>,
 
+    /// If true, block requests that are not targeting GraphQL endpoints (e.g. REST scanners).
+    #[arg(
+        long,
+        env = "WAF_GRAPHQL_BLOCK_NON_GRAPHQL_PATHS",
+        default_missing_value = "true",
+        num_args = 0..=1
+    )]
+    graphql_block_non_graphql_paths: Option<bool>,
+
     /// If present on the request, bypass introspection blocking (useful for tools like GoTestWAF).
     #[arg(long, env = "WAF_GRAPHQL_ALLOW_INTROSPECTION_HEADER")]
     graphql_allow_introspection_header: Option<String>,
@@ -435,6 +444,25 @@ async fn handle_request(
         HttpBodyBytes::copy_from_slice(&body_bytes[..state.max_body_bytes])
     };
     let is_graphql = looks_like_graphql_request(&req, &inspected_body);
+    let path = req.uri().path();
+
+    // Optional hardening: block non-GraphQL paths early (REST scanners often target random endpoints).
+    if state.mode != WafMode::Off
+        && state.graphql_sec.enabled
+        && state.graphql_sec.block_non_graphql_paths
+        && path != "/graphql"
+        && path != "/graphiql"
+    {
+        if state.mode == WafMode::Audit {
+            warn!(path = %path, "blocked_non_graphql_path (audit)");
+        }
+        if state.mode == WafMode::Block {
+            let mut resp = blocked_response_for(&req);
+            resp.headers_mut()
+                .insert("x-waf-blocked", HeaderValue::from_static("true"));
+            return Ok(resp);
+        }
+    }
 
     // WAF decisions.
     let mut matched_wirefilter = false;
@@ -686,6 +714,11 @@ async fn run(cli: Cli) -> Result<()> {
         .graphql_security
         .or_else(|| file_cfg.as_ref().and_then(|c| c.graphql.as_ref()?.enabled))
         .unwrap_or(true);
+    let gql_block_non_graphql_paths = cli.graphql_block_non_graphql_paths.or_else(|| {
+        file_cfg
+            .as_ref()
+            .and_then(|c| c.graphql.as_ref()?.block_non_graphql_paths)
+    });
     let gql_block_introspection = cli
         .block_introspection
         .or_else(|| {
@@ -817,6 +850,7 @@ async fn run(cli: Cli) -> Result<()> {
         max_body_bytes,
         graphql_sec: GraphqlSecurityConfig {
             enabled: gql_enabled,
+            block_non_graphql_paths: gql_block_non_graphql_paths.unwrap_or(false),
             block_introspection: gql_block_introspection,
             allow_introspection_header: gql_allow_introspection_header,
             allow_get: gql_allow_get,

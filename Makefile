@@ -1,4 +1,4 @@
-.PHONY: help build run run-dev fmt clippy clean semgrep-install semgrep k6-install wkhtmltopdf-install k6-report upstream-run waf-run perf-k6 perf-k6-introspection-block perf-k6-batch-block perf-k6-depth-block perf-k6-aliases-block perf-k6-directives-block perf-k6-max-query-bytes-block perf-k6-cost-block gotestwaf-pull gotestwaf-scan gotestwaf-scan-owasp gotestwaf-scan-owasp-api gotestwaf-scan-graphql
+.PHONY: help build run run-dev fmt clippy clean semgrep-install semgrep k6-install wkhtmltopdf-install k6-report upstream-run waf-run perf-k6 perf-k6-introspection-block perf-k6-batch-block perf-k6-depth-block perf-k6-aliases-block perf-k6-directives-block perf-k6-max-query-bytes-block perf-k6-cost-block gotestwaf-pull gotestwaf-scan gotestwaf-scan-owasp gotestwaf-scan-owasp-api gotestwaf-scan-graphql run-dev-gotestwaf-graphql
 
 WAF_URL ?= http://127.0.0.1:8080
 UPSTREAM_URL ?= http://127.0.0.1:4000
@@ -12,7 +12,7 @@ K6_REPORT_HTML ?= reports/k6-report.html
 K6_REPORT_PDF ?= reports/k6-report.pdf
 WAF_ARGS ?= --listen-host 127.0.0.1 --listen-port 8080 --mode off
 # Defaults for `make run-dev` (blocks using all GraphQL protections + limits).
-RUN_DEV_WAF_ARGS ?= --listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --block-introspection --block-graphql-batch --graphql-max-query-bytes 8192 --graphql-max-depth 20 --graphql-max-aliases 50 --graphql-max-directives 50 --graphql-max-cost 200
+RUN_DEV_WAF_ARGS ?= --listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-block-non-graphql-paths --block-introspection --block-graphql-batch --graphql-max-query-bytes 8192 --graphql-max-depth 20 --graphql-max-aliases 50 --graphql-max-directives 50 --graphql-max-cost 200
 REPORT_DIR ?= reports
 # Our WAF currently blocks with HTTP 400 and a distinctive body string.
 GTW_BLOCK_STATUS ?= 400
@@ -25,6 +25,9 @@ GTW_GRAPHQL_URL ?= $(WAF_URL)/graphql
 # HTTP client: use gohttp to avoid Chrome/CDP JSON decode noise in logs (IPAddressSpace errors).
 GTW_HTTP_CLIENT ?= gohttp
 GTW_EXTRA ?=
+# GoTestWAF selection. If GTW_TESTCASE is empty, the full test set runs.
+GTW_TESTSET ?= owasp-api
+GTW_TESTCASE ?=
 
 help:
 	@echo "Targets:"
@@ -313,3 +316,65 @@ gotestwaf-scan-graphql:
 		--blockStatusCodes="$(GTW_BLOCK_STATUS)" $(if $(GTW_BLOCK_REGEX),--blockRegex="$(GTW_BLOCK_REGEX)",) \
 		--testSet=owasp-api --testCase=graphql \
 		$(if $(GTW_GRAPHQL_URL),--graphqlURL="$(GTW_GRAPHQL_URL)",) $(GTW_EXTRA)
+
+# One-shot: start upstream + WAF (RUN_DEV_WAF_ARGS) then run GoTestWAF.
+# Defaults to the full OWASP API test set; optionally narrow with GTW_TESTCASE.
+run-dev-gotestwaf-graphql:
+	@bash -lc '\
+		set -euo pipefail; \
+		command -v docker >/dev/null 2>&1 || { echo "docker is required for GoTestWAF"; exit 2; }; \
+		echo "Building upstream + WAF..."; \
+		cargo build --manifest-path dvga-like-server/Cargo.toml; \
+		cargo build; \
+		up_bin="dvga-like-server/target/debug/dvga-like-server"; \
+		waf_bin="target/debug/graphql-waf"; \
+		cores="$$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"; \
+		waf_threads_arg=""; \
+		if [[ "$(RUN_DEV_WAF_ARGS)" != *"--worker-threads"* ]]; then \
+			waf_threads_arg="--worker-threads $$cores"; \
+		fi; \
+		echo "Starting upstream at $(UPSTREAM_URL)"; \
+		"$$up_bin" >/tmp/dvga-like-server.log 2>&1 & up_pid="$$!"; \
+		sleep 0.5; \
+		echo "Starting WAF at $(WAF_URL) -> $(UPSTREAM_URL)"; \
+		"$$waf_bin" --upstream "$(UPSTREAM_URL)" $$waf_threads_arg $(RUN_DEV_WAF_ARGS) >/tmp/graphql-waf.log 2>&1 & waf_pid="$$!"; \
+		trap "kill $$waf_pid $$up_pid >/dev/null 2>&1 || true" EXIT INT TERM; \
+		echo "Waiting for WAF to serve GraphQL POST..."; \
+		for i in $$(seq 1 40); do \
+			code="$$(curl -sS -m 2 -o /dev/null -w "%{http_code}" \
+				-H "content-type: application/json" \
+				--data "{\"query\":\"query { ping }\"}" \
+				"$(WAF_URL)/graphql" 2>/dev/null || true)"; \
+			if [[ "$$code" == "200" ]]; then break; fi; \
+			sleep 0.25; \
+		done; \
+		if [[ "$$code" != "200" ]]; then \
+			echo "WAF GraphQL endpoint did not become ready (last HTTP $$code)"; \
+			echo "Upstream log: /tmp/dvga-like-server.log"; \
+			echo "WAF log:      /tmp/graphql-waf.log"; \
+			exit 2; \
+		fi; \
+		echo "Running GoTestWAF against $(WAF_URL) (testSet=$(GTW_TESTSET) testCase=$(GTW_TESTCASE))"; \
+		gtw_case_arg=""; \
+		if [[ -n "$(GTW_TESTCASE)" ]]; then gtw_case_arg="--testCase=$(GTW_TESTCASE)"; fi; \
+		$(MAKE) gotestwaf-scan GTW_EXTRA="--addDebugHeader --testSet=$(GTW_TESTSET) $$gtw_case_arg $(GTW_EXTRA)"; \
+		echo "Done. Reports in $(REPORT_DIR)/"; \
+		opener=""; \
+		if command -v xdg-open >/dev/null 2>&1; then opener="xdg-open"; fi; \
+		if command -v open >/dev/null 2>&1; then opener="open"; fi; \
+		if [[ -n "$$opener" ]]; then \
+			pdf="$$(ls -t "$(REPORT_DIR)"/*.pdf 2>/dev/null | head -n 1 || true)"; \
+			html="$$(ls -t "$(REPORT_DIR)"/*.html 2>/dev/null | head -n 1 || true)"; \
+			if [[ -n "$$pdf" ]]; then \
+				echo "Opening report: $$pdf"; \
+				"$$opener" "$$pdf" >/dev/null 2>&1 || true; \
+			elif [[ -n "$$html" ]]; then \
+				echo "Opening report: $$html"; \
+				"$$opener" "$$html" >/dev/null 2>&1 || true; \
+			else \
+				echo "No PDF/HTML report found to open."; \
+			fi; \
+		else \
+			echo "No browser opener found (xdg-open/open)."; \
+		fi; \
+	'

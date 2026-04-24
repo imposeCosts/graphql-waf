@@ -5,9 +5,17 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
 
   - package-ecosystem: "cargo"
     directory: "/dvga-like-server"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"

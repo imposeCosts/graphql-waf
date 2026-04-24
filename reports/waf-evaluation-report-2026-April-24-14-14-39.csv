@@ -1,0 +1,19 @@
+Payload,Check Status,Response Code,Placeholder,Encoder,Set,Case,Test Result
+"{""query"": ""IntrospectionQuery{__schema {queryType { name }}""}",blocked,400,GraphQL,Plain,owasp-api,graphql-post,passed
+"{""query"": ""query IntrospectionQuery {__schema {queryType { name }mutationType { name }subscriptionType { name }types {...FullType}directives {namedescriptionlocationsargs {...InputValue}}}}fragment FullType on __Type {kindnamedescriptionfields(includeDeprecated: true) {namedescriptionargs {...InputValue}type {...TypeRef}isDeprecateddeprecationReason}inputFields {...InputValue}interfaces {...TypeRef}enumValues(includeDeprecated: true) {namedescriptionisDeprecateddeprecationReason}possibleTypes {...TypeRef}}fragment InputValue on __InputValue {namedescriptiontype { ...TypeRef }defaultValue}fragment TypeRef on __Type {kindnameofType {kindnameofType {kindnameofType {kindnameofType {kindnameofType {kindnameofType {kindnameofType {kindname}}}}}}}}""}",blocked,400,GraphQL,Plain,owasp-api,graphql-post,passed
+%7B%22query%22:%20%22query%20IntrospectionQuery%20%7B__schema%20%7BqueryType%20%7B%20name%20%7DmutationType%20%7B%20name%20%7DsubscriptionType%20%7B%20name%20%7Dtypes%20%7B...FullType%7Ddirectives%20%7Bnamedescriptionlocationsargs%20%7B...InputValue%7D%7D%7D%7Dfragment%20FullType%20on%20__Type%20%7Bkindnamedescriptionfields%28includeDeprecated:%20true%29%20%7Bnamedescriptionargs%20%7B...InputValue%7Dtype%20%7B...TypeRef%7DisDeprecateddeprecationReason%7DinputFields%20%7B...InputValue%7Dinterfaces%20%7B...TypeRef%7DenumValues%28includeDeprecated:%20true%29%20%7BnamedescriptionisDeprecateddeprecationReason%7DpossibleTypes%20%7B...TypeRef%7D%7Dfragment%20InputValue%20on%20__InputValue%20%7Bnamedescriptiontype%20%7B%20...TypeRef%20%7DdefaultValue%7Dfragment%20TypeRef%20on%20__Type%20%7BkindnameofType%20%7BkindnameofType%20%7BkindnameofType%20%7BkindnameofType%20%7BkindnameofType%20%7BkindnameofType%20%7BkindnameofType%20%7Bkindname%7D%7D%7D%7D%7D%7D%7D%7D%22%7D,blocked,400,GraphQL,URL,owasp-api,graphql,passed
+%7B%22query%22:%20%22IntrospectionQuery%7B__schema%20%7BqueryType%20%7B%20name%20%7D%7D%22%7D,blocked,400,GraphQL,URL,owasp-api,graphql,passed
+1e1 union select users from password,blocked,400,RawRequest,Plain,owasp-api,non-crud,passed
+<script>aaa</script>,blocked,400,RawRequest,Plain,owasp-api,non-crud,passed
+'-alert(1)//,blocked,400,SOAPBody,Plain,owasp-api,soap,passed
+"alert.call(%20, ""XSS"");",blocked,400,SOAPBody,Plain,owasp-api,soap,passed
+"confirm.call(null,1)",blocked,400,SOAPBody,Plain,owasp-api,soap,passed
+123) AND 12=12 AND JSON_DEPTH('{}') != 2521,blocked,400,SOAPBody,Plain,owasp-api,soap,passed
+"alert.apply(null, [1])",blocked,400,SOAPBody,Plain,owasp-api,soap,passed
+<script>aaa</script>,passed,404,JSONRequest,Plain,owasp-api,rest,failed
+1e1 union select users from password,passed,404,JSONRequest,Plain,owasp-api,rest,failed
+'-alert(1)//,passed,404,JSONRequest,Plain,owasp-api,rest,failed
+"alert.call(%20, ""XSS"");",passed,404,JSONRequest,Plain,owasp-api,rest,failed
+"confirm.call(null,1)",passed,404,JSONRequest,Plain,owasp-api,rest,failed
+123) AND 12=12 AND JSON_DEPTH('{}') != 2521,passed,404,JSONRequest,Plain,owasp-api,rest,failed
+"alert.apply(null, [1])",passed,404,JSONRequest,Plain,owasp-api,rest,failed
