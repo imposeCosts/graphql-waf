@@ -255,7 +255,9 @@ pub fn strip_graphql_field_suggestions(json_body: &[u8]) -> Option<Vec<u8>> {
 
     let mut changed = false;
     for err in errors {
-        let Some(msg) = err.get_mut("message") else { continue };
+        let Some(msg) = err.get_mut("message") else {
+            continue;
+        };
         let Some(s) = msg.as_str() else { continue };
 
         // Remove trailing suggestion clause. Common patterns:
@@ -335,7 +337,11 @@ fn max_depth_selection_set(
 
                 visiting.remove(name);
                 // Count the spread itself as 1 depth + fragment selection depth (if any).
-                if depth == 0 { 1 } else { 1 + depth }
+                if depth == 0 {
+                    1
+                } else {
+                    1 + depth
+                }
             }
         }
     }
@@ -495,7 +501,9 @@ fn compute_cost(doc: &Document<String>, cfg: &GraphqlSecurityConfig) -> f64 {
                 }
                 let cost = fragments
                     .get(name)
-                    .map(|frag| walk_selection_set(&frag.selection_set, cfg, fragments, visiting, depth))
+                    .map(|frag| {
+                        walk_selection_set(&frag.selection_set, cfg, fragments, visiting, depth)
+                    })
                     .unwrap_or(0.0);
                 visiting.remove(name);
                 cost
@@ -619,7 +627,8 @@ pub fn evaluate_graphql_security(
 
     // Variables limits: inspect variables from GET (?variables=) or JSON body {"variables": ...}
     // Apply before parsing the query document so a huge variables blob can't bypass cheap checks.
-    let variables = extract_variables_from_get(req).or_else(|| extract_variables_from_body(req, inspected_body));
+    let variables = extract_variables_from_get(req)
+        .or_else(|| extract_variables_from_body(req, inspected_body));
     if let Some(vars) = variables {
         let st = variables_stats(&vars);
 

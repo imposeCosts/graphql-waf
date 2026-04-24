@@ -533,7 +533,9 @@ async fn handle_request(
             }
 
             let (mut parts, body) = resp.into_parts();
-            let body_bytes = to_bytes(body).await.context("read upstream response body")?;
+            let body_bytes = to_bytes(body)
+                .await
+                .context("read upstream response body")?;
             if body_bytes.len() <= state.graphql_sec.max_response_bytes {
                 if let Some(rewritten) = strip_graphql_field_suggestions(body_bytes.as_ref()) {
                     parts.headers.remove(header::CONTENT_LENGTH);
@@ -710,7 +712,11 @@ async fn run(cli: Cli) -> Result<()> {
         .unwrap_or(true);
     let gql_allow_get = cli
         .graphql_allow_get
-        .or_else(|| file_cfg.as_ref().and_then(|c| c.graphql.as_ref()?.allow_get))
+        .or_else(|| {
+            file_cfg
+                .as_ref()
+                .and_then(|c| c.graphql.as_ref()?.allow_get)
+        })
         .unwrap_or(false);
     let gql_allow_introspection_header =
         cli.graphql_allow_introspection_header.clone().or_else(|| {
