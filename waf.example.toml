@@ -12,6 +12,8 @@ worker_threads = 4
 
 [graphql]
 enabled = true
+# If true, block requests not targeting GraphQL endpoints (e.g. REST scanners).
+# block_non_graphql_paths = true
 block_introspection = true
 # allow_introspection_header = "X-GoTestWAF-Test"
 block_batch = false

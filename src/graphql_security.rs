@@ -10,6 +10,11 @@ use std::collections::{HashMap, HashSet};
 #[derive(Clone, Debug)]
 pub struct GraphqlSecurityConfig {
     pub enabled: bool,
+    /// If true, block requests that are not targeting GraphQL endpoints.
+    ///
+    /// This is useful when the proxy is intended to expose only GraphQL, and you
+    /// want to reject REST/other endpoints early.
+    pub block_non_graphql_paths: bool,
     pub block_introspection: bool,
     /// If set and present on the request, introspection blocking is bypassed.
     pub allow_introspection_header: Option<String>,
@@ -720,6 +725,7 @@ mod tests {
     fn cfg_base() -> GraphqlSecurityConfig {
         GraphqlSecurityConfig {
             enabled: true,
+            block_non_graphql_paths: false,
             block_introspection: false,
             allow_introspection_header: None,
             allow_get: false,

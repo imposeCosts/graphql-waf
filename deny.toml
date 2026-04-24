@@ -1,0 +1,31 @@
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Fail on RustSec vulnerabilities by default. Configure granular exceptions via `ignore`.
+ignore = []
+# Whether an unmaintained/unsound advisory should fail the check.
+# Values: "all" | "workspace" | "transitive" | "none"
+unmaintained = "workspace"
+unsound = "all"
+
+[licenses]
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-DFS-2016",
+  "Zlib",
+  "OpenSSL",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = []
