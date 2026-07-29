@@ -202,3 +202,102 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // These clamps exist so k6/gotestwaf load tests exercise bounded, predictable resource
+    // usage. A silent regression here would let unbounded requests through and invalidate
+    // load-test results without anyone noticing.
+
+    fn test_schema() -> AppSchema {
+        Schema::build(QueryRoot, EmptyMutation, EmptySubscription).finish()
+    }
+
+    /// Builds a GraphQL query nesting `child { ... }` `levels` times, terminating in `id`.
+    /// Kept well under async-graphql-parser's own selection-set recursion limit (independent
+    /// of this server's `depth.clamp(0, 200)`), which rejects deeply nested query *documents*
+    /// long before 200 levels.
+    fn nested_child_query(depth_arg: i32, levels: usize) -> String {
+        let mut q = "id".to_string();
+        for _ in 0..levels {
+            q = format!("id child {{ {q} }}");
+        }
+        format!("{{ nestedNode(depth: {depth_arg}) {{ {q} }} }}")
+    }
+
+    #[test]
+    fn fib_matches_known_values() {
+        assert_eq!(fib(0), 0);
+        assert_eq!(fib(1), 1);
+        assert_eq!(fib(10), 55);
+        assert_eq!(fib(45), 1_134_903_170);
+    }
+
+    #[test]
+    fn build_node_chain_length_clamps_to_requested_max() {
+        // `nested_node`'s resolver calls `build_node(0, depth.clamp(0, 200))`; verify the
+        // underlying chain-building logic itself produces exactly `max + 1` nodes (ids 0..=max),
+        // which is what the 200 clamp relies on to bound the response size.
+        let root = build_node(0, 200);
+        let mut count = 1;
+        let mut cur = &root;
+        while let Some(child) = &cur.child {
+            count += 1;
+            cur = child;
+        }
+        assert_eq!(count, 201);
+    }
+
+    #[tokio::test]
+    async fn big_list_clamps_size_to_50_000() {
+        let schema = test_schema();
+        let res = schema
+            .execute("{ bigList(size: 1000000) { id } }")
+            .await;
+        assert!(res.errors.is_empty(), "{:?}", res.errors);
+        let json = serde_json::to_value(res.data).unwrap();
+        let list = json["bigList"].as_array().unwrap();
+        assert_eq!(list.len(), 50_000);
+    }
+
+    #[tokio::test]
+    async fn big_list_respects_smaller_requested_size() {
+        let schema = test_schema();
+        let res = schema.execute("{ bigList(size: 5) { id } }").await;
+        assert!(res.errors.is_empty(), "{:?}", res.errors);
+        let json = serde_json::to_value(res.data).unwrap();
+        let list = json["bigList"].as_array().unwrap();
+        assert_eq!(list.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn nested_node_does_not_truncate_below_a_modest_depth() {
+        // Regression smoke test at the GraphQL wire level: requesting far more depth than the
+        // 200 clamp allows must still honor at least this (much shallower) selection depth,
+        // catching a gross regression (e.g. clamp accidentally set far below 200) without
+        // fighting the parser's own much lower selection-set recursion limit.
+        let levels = 20;
+        let query = nested_child_query(100_000, levels);
+        let res = schema_execute(&query).await;
+
+        let json = serde_json::to_value(res.data).unwrap();
+        let mut node = &json["nestedNode"];
+        for expected_depth in 0..=levels {
+            let id = node["id"].as_i64().unwrap();
+            assert_eq!(id, expected_depth as i64);
+            if expected_depth < levels {
+                node = &node["child"];
+                assert!(!node.is_null(), "expected non-null child at depth {expected_depth}");
+            }
+        }
+    }
+
+    async fn schema_execute(query: &str) -> async_graphql::Response {
+        let schema = test_schema();
+        let res = schema.execute(query).await;
+        assert!(res.errors.is_empty(), "{:?}", res.errors);
+        res
+    }
+}

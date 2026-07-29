@@ -18,6 +18,7 @@ pub struct WafSection {
     pub modsec_rules: Option<Vec<String>>,
     pub wirefilter: Option<String>,
     pub max_body_bytes: Option<usize>,
+    pub reject_oversized_body: Option<bool>,
     pub worker_threads: Option<usize>,
 }
 

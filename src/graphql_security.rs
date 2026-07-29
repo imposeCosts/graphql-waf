@@ -72,13 +72,28 @@ impl GraphqlMatch {
 }
 
 fn contains_introspection_bytes(haystack: &[u8]) -> bool {
-    // Avoid false positives like "__typename" (which contains "__type" as a prefix).
+    // Avoid false positives like "__typename" (which contains "__type" as a prefix), and
+    // like a custom field/identifier that merely *ends* with "__type"/"__schema"
+    // (e.g. "custom__type(" or "foo__schema:") -- both the byte before and the byte after
+    // the matched token must be a non-identifier boundary (or start/end of buffer) for it
+    // to count as the real `__schema`/`__type` introspection field.
+    fn is_ident_byte(b: u8) -> bool {
+        b.is_ascii_alphanumeric() || b == b'_'
+    }
+
     fn has_token(h: &[u8], token: &[u8]) -> bool {
         let mut start = 0usize;
         while let Some(pos) = memmem::find(&h[start..], token) {
             let at = start + pos;
+            let prev = if at == 0 {
+                None
+            } else {
+                h.get(at - 1).copied()
+            };
+            let is_prev_boundary = prev.is_none_or(|b| !is_ident_byte(b));
+
             let next = h.get(at + token.len()).copied();
-            let is_boundary = next.is_none()
+            let is_next_boundary = next.is_none()
                 || matches!(next, Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r'))
                 || matches!(
                     next,
@@ -91,7 +106,7 @@ fn contains_introspection_bytes(haystack: &[u8]) -> bool {
                         | Some(b',')
                         | Some(b')')
                 );
-            if is_boundary {
+            if is_prev_boundary && is_next_boundary {
                 return true;
             }
             start = at + token.len();
@@ -1111,5 +1126,28 @@ mod tests {
         let m = evaluate_graphql_security(&cfg, &r, &body).unwrap();
         assert!(m.matched);
         assert_eq!(m.reason, Some("graphql_variables_array_exceeded"));
+    }
+
+    #[test]
+    fn introspection_token_boundary_ignores_trailing_identifier_suffix() {
+        // A field/identifier that merely *ends* with "__type"/"__schema" (e.g. a custom
+        // field name) must not be flagged -- only the real `__type`/`__schema` fields.
+        assert!(!contains_introspection_bytes(b"{ custom__type(id: 1) }"));
+        assert!(!contains_introspection_bytes(b"{ foo__schema: bar }"));
+        assert!(!contains_introspection_bytes(b"my__typeSomething"));
+    }
+
+    #[test]
+    fn introspection_token_boundary_still_matches_real_fields() {
+        assert!(contains_introspection_bytes(b"{__schema{queryType{name}}}"));
+        assert!(contains_introspection_bytes(
+            b"query { __type(name: \"Query\") { name } }"
+        ));
+        assert!(contains_introspection_bytes(b" __type "));
+    }
+
+    #[test]
+    fn introspection_token_boundary_still_excludes_typename() {
+        assert!(!contains_introspection_bytes(b"{ __typename }"));
     }
 }
