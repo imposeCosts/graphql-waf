@@ -1,0 +1,21 @@
+# API4:2023 Unrestricted Resource Consumption
+# ---------------------------------------------------------------------------
+# Ports the same depth/alias/directive/cost/batch amplification shapes already used by
+# k6/graphql_loadtest.js's `depth`/`aliases`/`directives`/`cost`/`batch` modes into single-shot
+# GoTestWAF payloads, so these DoS-shaped queries are covered by a WAF scan (not just load
+# testing). These are schema-agnostic: depth/alias/directive counting happens on the parsed
+# query AST before schema validation (see src/graphql_security.rs), so the field names below
+# don't need to exist in the upstream schema for the WAF-side checks to trigger.
+payload:
+  - '{"query":"query { a { b { c { d { e { f { g { h { i { j } } } } } } } } } }"}'
+  - '{"query":"query { a1: ping a2: ping a3: ping a4: ping a5: ping a6: ping a7: ping a8: ping a9: ping a10: ping a11: ping a12: ping a13: ping a14: ping a15: ping a16: ping a17: ping a18: ping a19: ping a20: ping a21: ping a22: ping a23: ping a24: ping a25: ping a26: ping a27: ping a28: ping a29: ping a30: ping a31: ping a32: ping a33: ping a34: ping a35: ping a36: ping a37: ping a38: ping a39: ping a40: ping a41: ping a42: ping a43: ping a44: ping a45: ping a46: ping a47: ping a48: ping a49: ping a50: ping a51: ping }"}'
+  - '{"query":"query { ping @skip(if: true) @include(if: true) @skip(if: false) @include(if: false) @skip(if: true) @include(if: true) @skip(if: false) @include(if: false) @skip(if: true) @include(if: true) }"}'
+  - '{"query":"query { nestedNode(depth: 100000) { id child { id child { id child { id child { id child { id } } } } } } }"}'
+  - '[{"query":"{ ping }"},{"query":"{ ping }"},{"query":"{ ping }"},{"query":"{ ping }"},{"query":"{ ping }"}]'
+  - '{"query":"query { bigList(size: 999999999) { id name } }"}'
+encoder:
+  - Plain
+placeholder:
+  - GraphQL:
+      method: "POST"
+type: GraphQL

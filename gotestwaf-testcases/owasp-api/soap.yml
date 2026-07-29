@@ -1,5 +1,5 @@
 payload:
- - "\'-alert(1)//"
+ - "'-alert(1)//"
  - 'confirm.call(null,1)'
  - 'alert.call(%20, "XSS");'
  - "123) AND 12=12 AND JSON_DEPTH('{}') != 2521"

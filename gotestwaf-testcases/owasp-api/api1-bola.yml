@@ -1,0 +1,19 @@
+# API1:2023 Broken Object Level Authorization (heuristic proxy only)
+# ---------------------------------------------------------------------------
+# GoTestWAF is a payload/signature scanner -- it has no knowledge of which object IDs a given
+# caller is actually authorized to access, so it cannot verify real BOLA. What it *can* test is
+# whether the WAF flags obviously anomalous object-ID access patterns embedded in GraphQL
+# variables (sequential/negative/out-of-range/wildcard-shaped IDs), which is a common signal
+# used by ID-enumeration/scraping tooling. Treat blocks here as "the WAF has some visibility
+# into ID-enumeration-shaped traffic", not "the WAF prevents BOLA" -- that requires
+# application-level authorization checks, which are out of scope for a WAF.
+payload:
+  - '{"query":"query($id:Int!){nestedNode(depth:$id){id}}","variables":{"id":-1}}'
+  - '{"query":"query($id:Int!){nestedNode(depth:$id){id}}","variables":{"id":2147483647}}'
+  - '{"query":"query($ids:[Int!]!){bigList(size:1){id}}","variables":{"ids":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]}}'
+encoder:
+  - Plain
+placeholder:
+  - GraphQL:
+      method: "POST"
+type: GraphQL

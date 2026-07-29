@@ -5,5 +5,5 @@ encoder:
  - Plain
 placeholder:
  - GraphQL:
- method: "POST"
+     method: "POST"
 type: GraphQL

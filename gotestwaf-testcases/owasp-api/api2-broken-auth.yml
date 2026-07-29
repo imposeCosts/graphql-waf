@@ -1,0 +1,25 @@
+# API2:2023 Broken Authentication
+# ---------------------------------------------------------------------------
+# Tests how the WAF/upstream handle malformed, forged, or missing Authorization values reaching
+# the GraphQL endpoint. Uses the RawRequest placeholder (not GraphQL) because it's the only
+# placeholder that lets a custom header value be set to the payload -- the GraphQL placeholder
+# has no header support.
+payload:
+  - 'Bearer null'
+  - 'Bearer undefined'
+  - 'Bearer '
+  - 'Basic YWRtaW46YWRtaW4='
+  - 'Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.'
+  - 'Bearer '' OR ''1''=''1'
+  - 'Bearer ../../../../etc/passwd'
+encoder:
+  - Plain
+placeholder:
+  - RawRequest:
+      method: "POST"
+      path: "/graphql"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "{{payload}}"
+      body: '{"query":"query { ping }"}'
+type: REST

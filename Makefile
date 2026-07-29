@@ -1,4 +1,4 @@
-.PHONY: help build run run-dev fmt clippy test clean semgrep-install semgrep k6-install wkhtmltopdf-install k6-report upstream-run waf-run perf-k6 perf-k6-introspection-block perf-k6-batch-block perf-k6-depth-block perf-k6-aliases-block perf-k6-directives-block perf-k6-max-query-bytes-block perf-k6-cost-block gotestwaf-pull gotestwaf-scan gotestwaf-scan-owasp gotestwaf-scan-owasp-api gotestwaf-scan-graphql run-dev-gotestwaf-graphql
+.PHONY: help build run run-dev fmt clippy test clean semgrep-install semgrep k6-install wkhtmltopdf-install k6-report upstream-run waf-run perf-k6 perf-k6-introspection-block perf-k6-batch-block perf-k6-depth-block perf-k6-aliases-block perf-k6-directives-block perf-k6-max-query-bytes-block perf-k6-cost-block perf-k6-fragment-amplification-block gotestwaf-pull gotestwaf-scan gotestwaf-scan-owasp gotestwaf-scan-owasp-api gotestwaf-scan-custom gotestwaf-scan-graphql run-dev-gotestwaf-graphql
 
 WAF_URL ?= http://127.0.0.1:8080
 UPSTREAM_URL ?= http://127.0.0.1:4000
@@ -29,10 +29,20 @@ GTW_EXTRA ?=
 GTW_TESTSET ?= owasp-api
 GTW_TESTCASE ?=
 
+# RELEASE=1 builds/runs both binaries in release (optimized) mode; unset/0 uses debug.
+# Defaults to 1 (optimized) for performance-testing targets (perf-k6 and the perf-k6-*-block
+# variants, k6-report) since debug-mode numbers aren't representative; everyday dev-loop
+# targets (build/run/run-dev/waf-run/upstream-run) default to debug for faster iteration.
+# Override explicitly either way, e.g. `make run-dev RELEASE=1` or `make perf-k6 RELEASE=0`.
+# CARGO_BUILD_FLAG/CARGO_PROFILE_DIR use `=` (not `:=`) so they re-evaluate RELEASE lazily at
+# recipe-expansion time, picking up the target-specific defaults set below.
+CARGO_BUILD_FLAG = $(if $(filter 1,$(RELEASE)),--release,)
+CARGO_PROFILE_DIR = $(if $(filter 1,$(RELEASE)),release,debug)
+
 help:
 	@echo "Targets:"
-	@echo "  make build              Build (debug)"
-	@echo "  make run ARGS='...'     Run WAF (debug) with default UPSTREAM_URL"
+	@echo "  make build              Build (debug by default; RELEASE=1 for optimized)"
+	@echo "  make run ARGS='...'     Run WAF (debug by default; RELEASE=1 for optimized) with default UPSTREAM_URL"
 	@echo "  make semgrep-install    Install semgrep (pipx preferred)"
 	@echo "  make semgrep            Run semgrep scan"
 	@echo "  make k6-install         Install k6 (Linux package managers)"
@@ -56,6 +66,7 @@ help:
 	@echo "  make gotestwaf-scan      Scan WAF_URL (default $(WAF_URL))"
 	@echo "  make gotestwaf-scan-owasp     OWASP Top-10 test set"
 	@echo "  make gotestwaf-scan-owasp-api  OWASP API test set"
+	@echo "  make gotestwaf-scan-custom     Local gotestwaf-testcases/ (this repo's custom payloads)"
 	@echo "  make gotestwaf-scan-graphql   GraphQL test case (owasp-api/graphql)"
 	@echo ""
 	@echo "GoTestWAF vars:"
@@ -67,7 +78,7 @@ help:
 	@echo "  K6_BASE_URL=$(K6_BASE_URL)        (e.g. http://127.0.0.1:8080)"
 	@echo "  K6_VUS=$(K6_VUS)"
 	@echo "  K6_DURATION=$(K6_DURATION)"
-	@echo "  K6_MODE=$(K6_MODE)                (ping|nested|biglist|fib|introspection|batch|depth|aliases|directives|max_query_bytes|cost|mixed)"
+	@echo "  K6_MODE=$(K6_MODE)                (ping|nested|biglist|fib|introspection|batch|depth|aliases|directives|max_query_bytes|cost|fragment_amplification|ratelimit|auth_bypass|mixed)"
 	@echo "  K6_SUMMARY_JSON=$(K6_SUMMARY_JSON)"
 	@echo "  K6_REPORT_PDF=$(K6_REPORT_PDF)"
 	@echo "  WAF_ARGS='$(WAF_ARGS)'            (extra args passed to WAF)"
@@ -77,21 +88,26 @@ help:
 	@echo "  GTW_GRAPHQL_URL=$(GTW_GRAPHQL_URL) (GoTestWAF --graphqlURL; set empty to skip GraphQL subtests)"
 	@echo "  GTW_HTTP_CLIENT=$(GTW_HTTP_CLIENT) (--httpClient; use gohttp, not chrome)"
 	@echo "  GTW_EXTRA=                     (extra gotestwaf flags)"
+	@echo ""
+	@echo "Build profile:"
+	@echo "  RELEASE=0|1  Defaults to 1 (optimized) for perf-k6/k6-report/perf-k6-*-block,"
+	@echo "               0 (debug) for build/run/run-dev/waf-run/upstream-run. Override either"
+	@echo "               way, e.g. 'make run-dev RELEASE=1' or 'make perf-k6 RELEASE=0'."
 
 build:
-	cargo build
+	cargo build $(CARGO_BUILD_FLAG)
 
 run:
-	cargo run -- --upstream "$(UPSTREAM_URL)" $(ARGS)
+	cargo run $(CARGO_BUILD_FLAG) -- --upstream "$(UPSTREAM_URL)" $(ARGS)
 
 run-dev:
 	@bash -lc '\
 		set -euo pipefail; \
 		echo "Building upstream + WAF..."; \
-		cargo build --manifest-path dvga-like-server/Cargo.toml; \
-		cargo build; \
-		up_bin="dvga-like-server/target/debug/dvga-like-server"; \
-		waf_bin="target/debug/graphql-waf"; \
+		cargo build $(CARGO_BUILD_FLAG) --manifest-path dvga-like-server/Cargo.toml; \
+		cargo build $(CARGO_BUILD_FLAG); \
+		up_bin="dvga-like-server/target/$(CARGO_PROFILE_DIR)/dvga-like-server"; \
+		waf_bin="target/$(CARGO_PROFILE_DIR)/graphql-waf"; \
 		cores="$$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"; \
 		waf_threads_arg=""; \
 		if [[ "$(RUN_DEV_WAF_ARGS)" != *"--worker-threads"* ]]; then \
@@ -197,20 +213,21 @@ wkhtmltopdf-install:
 	'
 
 upstream-run:
-	cargo run --manifest-path dvga-like-server/Cargo.toml
+	cargo run $(CARGO_BUILD_FLAG) --manifest-path dvga-like-server/Cargo.toml
 
 waf-run:
-	cargo run -- --upstream "$(UPSTREAM_URL)" $(ARGS)
+	cargo run $(CARGO_BUILD_FLAG) -- --upstream "$(UPSTREAM_URL)" $(ARGS)
 
+perf-k6: RELEASE ?= 1
 perf-k6:
 	@bash -lc '\
 		set -euo pipefail; \
 		command -v k6 >/dev/null 2>&1 || { echo "k6 is required (install: https://k6.io/)"; exit 2; }; \
 		echo "Building upstream + WAF..."; \
-		cargo build --manifest-path dvga-like-server/Cargo.toml; \
-		cargo build; \
-		up_bin="dvga-like-server/target/debug/dvga-like-server"; \
-		waf_bin="target/debug/graphql-waf"; \
+		cargo build $(CARGO_BUILD_FLAG) --manifest-path dvga-like-server/Cargo.toml; \
+		cargo build $(CARGO_BUILD_FLAG); \
+		up_bin="dvga-like-server/target/$(CARGO_PROFILE_DIR)/dvga-like-server"; \
+		waf_bin="target/$(CARGO_PROFILE_DIR)/graphql-waf"; \
 		cores="$$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"; \
 		waf_threads_arg=""; \
 		if [[ "$(WAF_ARGS)" != *"--worker-threads"* ]]; then \
@@ -230,6 +247,7 @@ perf-k6:
 		echo "Done." \
 	'
 
+k6-report: RELEASE ?= 1
 k6-report:
 	@bash -lc '\
 		set -euo pipefail; \
@@ -241,32 +259,44 @@ k6-report:
 		echo "Wrote $(K6_REPORT_PDF)"; \
 	'
 
+perf-k6-introspection-block: RELEASE ?= 1
 perf-k6-introspection-block:
 	@$(MAKE) perf-k6 K6_MODE=introspection K6_VUS=1 K6_DURATION=2s \
 		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --block-introspection'
 
+perf-k6-batch-block: RELEASE ?= 1
 perf-k6-batch-block:
 	@$(MAKE) perf-k6 K6_MODE=batch K6_VUS=1 K6_DURATION=2s \
 		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --block-graphql-batch'
 
+perf-k6-depth-block: RELEASE ?= 1
 perf-k6-depth-block:
 	@$(MAKE) perf-k6 K6_MODE=depth K6_VUS=1 K6_DURATION=2s \
 		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-depth 3'
 
+perf-k6-aliases-block: RELEASE ?= 1
 perf-k6-aliases-block:
 	@$(MAKE) perf-k6 K6_MODE=aliases K6_VUS=1 K6_DURATION=2s \
 		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-aliases 1'
 
+perf-k6-directives-block: RELEASE ?= 1
 perf-k6-directives-block:
 	@$(MAKE) perf-k6 K6_MODE=directives K6_VUS=1 K6_DURATION=2s \
 		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-directives 1'
 
+perf-k6-max-query-bytes-block: RELEASE ?= 1
 perf-k6-max-query-bytes-block:
 	@$(MAKE) perf-k6 K6_MODE=max_query_bytes K6_VUS=1 K6_DURATION=2s K6_PAD=200 \
 		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-query-bytes 10'
 
+perf-k6-cost-block: RELEASE ?= 1
 perf-k6-cost-block:
 	@$(MAKE) perf-k6 K6_MODE=cost K6_VUS=1 K6_DURATION=2s \
+		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-cost 5'
+
+perf-k6-fragment-amplification-block: RELEASE ?= 1
+perf-k6-fragment-amplification-block:
+	@$(MAKE) perf-k6 K6_MODE=fragment_amplification K6_VUS=1 K6_DURATION=2s \
 		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-cost 5'
 
 fmt:
@@ -311,6 +341,22 @@ gotestwaf-scan-owasp-api:
 		$(if $(GTW_GRAPHQL_URL),--graphqlURL="$(GTW_GRAPHQL_URL)",) \
 		--testSet=owasp-api $(GTW_EXTRA)
 
+gotestwaf-scan-custom:
+	@# The gotestwaf-testcases/ files were previously not wired into any scan target (no
+	@# volume mount / --testCasesPath), so they were never actually exercised. This target
+	@# fixes that. Note --testCasesPath *replaces* GoTestWAF's bundled test corpus rather than
+	@# adding to it, so this intentionally stays a separate target from gotestwaf-scan-owasp /
+	@# gotestwaf-scan-owasp-api (which rely on the image's own, more complete built-in sets).
+	mkdir -p "$(REPORT_DIR)"
+	docker run --rm --network="host" \
+		-v "$(PWD)/$(REPORT_DIR):/app/reports" \
+		-v "$(PWD)/gotestwaf-testcases:/app/testcases" \
+		wallarm/gotestwaf --url="$(WAF_URL)" --noEmailReport --skipWAFIdentification \
+		--skipWAFBlockCheck --httpClient="$(GTW_HTTP_CLIENT)" \
+		--blockStatusCodes="$(GTW_BLOCK_STATUS)" $(if $(GTW_BLOCK_REGEX),--blockRegex="$(GTW_BLOCK_REGEX)",) \
+		$(if $(GTW_GRAPHQL_URL),--graphqlURL="$(GTW_GRAPHQL_URL)",) \
+		--testCasesPath=/app/testcases --testSet=owasp-api $(GTW_EXTRA)
+
 gotestwaf-scan-graphql:
 	mkdir -p "$(REPORT_DIR)"
 	docker run --rm --network="host" -v "$(PWD)/$(REPORT_DIR):/app/reports" \
@@ -328,10 +374,10 @@ run-dev-gotestwaf-graphql:
 		set -euo pipefail; \
 		command -v docker >/dev/null 2>&1 || { echo "docker is required for GoTestWAF"; exit 2; }; \
 		echo "Building upstream + WAF..."; \
-		cargo build --manifest-path dvga-like-server/Cargo.toml; \
-		cargo build; \
-		up_bin="dvga-like-server/target/debug/dvga-like-server"; \
-		waf_bin="target/debug/graphql-waf"; \
+		cargo build $(CARGO_BUILD_FLAG) --manifest-path dvga-like-server/Cargo.toml; \
+		cargo build $(CARGO_BUILD_FLAG); \
+		up_bin="dvga-like-server/target/$(CARGO_PROFILE_DIR)/dvga-like-server"; \
+		waf_bin="target/$(CARGO_PROFILE_DIR)/graphql-waf"; \
 		cores="$$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"; \
 		waf_threads_arg=""; \
 		if [[ "$(RUN_DEV_WAF_ARGS)" != *"--worker-threads"* ]]; then \

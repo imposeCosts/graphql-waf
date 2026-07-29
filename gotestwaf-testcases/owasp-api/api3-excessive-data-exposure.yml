@@ -1,0 +1,18 @@
+# API3:2023 Broken Object Property Level Authorization (excessive data exposure)
+# ---------------------------------------------------------------------------
+# GraphQL's field-selection model makes over-fetching easy: a client can request every field a
+# type exposes in one request rather than just what it needs. These payloads request broad
+# field sets from dvga-like-server's schema, including request_meta (which echoes request
+# headers back -- a stand-in for a resolver that leaks more than intended) and deeply nested
+# node selections. A WAF with --graphql-max-depth/--graphql-max-aliases tuned tightly should
+# flag at least the deeper ones.
+payload:
+  - '{"query":"query { requestMeta { headers { key value } } }"}'
+  - '{"query":"query { nestedNode(depth: 50) { id name depth child { id name depth child { id name depth child { id name depth } } } } }"}'
+  - '{"query":"query { bigList(size: 5000) { id name depth child { id name } } }"}'
+encoder:
+  - Plain
+placeholder:
+  - GraphQL:
+      method: "POST"
+type: GraphQL

@@ -80,6 +80,25 @@ const QUERY_DIRECTIVES_HEAVY = `query { ping @skip(if: true) @include(if: true) 
 const QUERY_COST_HEAVY = `query {
   a { b { c { d { e { f { g { h { i { j } } } } } } } } }
 }`;
+// Fragment reuse via aliases: the same fragment is expanded once per alias, multiplying the
+// effective selection cost without the query text itself containing repeated field bodies --
+// a naive depth/alias counter that only inspects the *unexpanded* document text could under-
+// count this relative to an equivalent fully-inlined query. Regression test for the cost
+// analyzer's fragment expansion (src/graphql_security.rs, cost_flatten_fragments).
+const QUERY_FRAGMENT_AMPLIFICATION = `query {
+  a1: nestedNode(depth: 5) { ...NodeFields }
+  a2: nestedNode(depth: 5) { ...NodeFields }
+  a3: nestedNode(depth: 5) { ...NodeFields }
+  a4: nestedNode(depth: 5) { ...NodeFields }
+  a5: nestedNode(depth: 5) { ...NodeFields }
+  a6: nestedNode(depth: 5) { ...NodeFields }
+  a7: nestedNode(depth: 5) { ...NodeFields }
+  a8: nestedNode(depth: 5) { ...NodeFields }
+}
+fragment NodeFields on Node {
+  id name depth
+  child { id name depth child { id name depth child { id name depth } } }
+}`;
 
 export default function () {
   const mode = __ENV.K6_MODE || "mixed";
@@ -115,6 +134,36 @@ export default function () {
   } else if (mode === "cost") {
     // Expect the WAF to block when --graphql-max-cost is set low enough.
     gql(QUERY_COST_HEAVY, {}, 400, true);
+  } else if (mode === "fragment_amplification") {
+    // Expect the WAF to block when --graphql-max-cost (or --graphql-max-aliases) is set low
+    // enough, same as "cost"/"aliases" -- this specifically exercises fragment-reuse-via-alias
+    // amplification rather than repeated inline field bodies.
+    gql(QUERY_FRAGMENT_AMPLIFICATION, {}, 400, true);
+  } else if (mode === "ratelimit") {
+    // PLACEHOLDER / future-proofing: graphql-waf has no rate-limiting feature yet (see
+    // TODO.MD). This mode fires requests back-to-back from a single VU with no sleep between
+    // them and currently expects every one to succeed -- once distributed rate limiting lands,
+    // update the expected status/check here to assert some requests get throttled (e.g. 429).
+    // This mode does not implement rate limiting itself; it only documents/tracks the gap.
+    gql(QUERY_PING, {}, 200, false);
+  } else if (mode === "auth_bypass") {
+    // PLACEHOLDER: graphql-waf has no auth-aware rules today (confirmed empirically --
+    // gotestwaf-testcases/owasp-api/api2-broken-auth.yml is 0% blocked by design, since
+    // validating Authorization/JWT semantics is an application concern, not a WAF one). This
+    // mode documents that a malformed bearer token currently reaches the upstream unmodified;
+    // if auth-aware wirefilter/modsec rules are ever added, update the expected status here.
+    const res = http.post(
+      GRAPHQL_URL,
+      JSON.stringify({ query: QUERY_PING }),
+      {
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer eyJhbGciOiJub25lIn0.eyJzdWIiOiJhZG1pbiJ9.",
+        },
+        timeout: __ENV.K6_TIMEOUT || "30s",
+      }
+    );
+    check(res, { "status is 200 (no auth enforcement today)": (r) => r.status === 200 });
   } else {
     // Mixed workload
     const r = Math.random();
