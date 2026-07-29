@@ -1,0 +1,154 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>k6 Load Test Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+    h1 { margin: 0 0 6px 0; }
+    .meta { color: #555; margin-bottom: 16px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f5f5f5; }
+    code { background: #f6f8fa; padding: 2px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>k6 Load Test Report</h1>
+  <div class="meta">Generated: 2026-07-29 13:47:08 UTC<br/>
+    Source: <code>reports/k6-summary.json</code>
+  </div>
+
+  <h2>Summary</h2>
+  <table>
+    <thead>
+      <tr><th>Metric</th><th>Field</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>http_reqs</td><td>count</td><td>9565</td></tr><tr><td>http_reqs</td><td>rate</td><td>474.5554</td></tr><tr><td>iterations</td><td>count</td><td>9565</td></tr><tr><td>iterations</td><td>rate</td><td>474.5554</td></tr><tr><td>http_req_failed</td><td>rate</td><td>0</td></tr><tr><td>http_req_duration</td><td>avg (ms)</td><td>101.2253</td></tr><tr><td>http_req_duration</td><td>p(90) (ms)</td><td>190.1472</td></tr><tr><td>http_req_duration</td><td>p(95) (ms)</td><td>220.8751</td></tr><tr><td>http_req_duration</td><td>p(99) (ms)</td><td></td></tr><tr><td>http_req_duration</td><td>max (ms)</td><td>523.5473</td></tr><tr><td>http_req_duration</td><td>min (ms)</td><td>1.1328</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Notes</h2>
+  <p>This report is generated from <code>k6 --summary-export</code> JSON and converted to PDF via <code>wkhtmltopdf</code>.</p>
+
+  <h2>Raw exported metrics (debug)</h2>
+  <p>If the table above is empty, your k6 version may export different fields. This section shows the raw <code>metrics</code> object.</p>
+  <pre style="white-space: pre-wrap; border: 1px solid #ddd; padding: 12px; background: #fafafa;">{
+  &quot;checks&quot;: {
+    &quot;fails&quot;: 0,
+    &quot;passes&quot;: 28695,
+    &quot;value&quot;: 1
+  },
+  &quot;data_received&quot;: {
+    &quot;count&quot;: 355347311,
+    &quot;rate&quot;: 17630109.399148952
+  },
+  &quot;data_sent&quot;: {
+    &quot;count&quot;: 2031567,
+    &quot;rate&quot;: 100793.63865427094
+  },
+  &quot;http_req_blocked&quot;: {
+    &quot;avg&quot;: 0.01018385018295872,
+    &quot;max&quot;: 21.221042,
+    &quot;med&quot;: 0.003544,
+    &quot;min&quot;: 0.000899,
+    &quot;p(90)&quot;: 0.005869600000000001,
+    &quot;p(95)&quot;: 0.007555799999999992
+  },
+  &quot;http_req_connecting&quot;: {
+    &quot;avg&quot;: 0.0023461830632514375,
+    &quot;max&quot;: 0.872509,
+    &quot;med&quot;: 0,
+    &quot;min&quot;: 0,
+    &quot;p(90)&quot;: 0,
+    &quot;p(95)&quot;: 0
+  },
+  &quot;http_req_duration&quot;: {
+    &quot;avg&quot;: 101.22527081641445,
+    &quot;max&quot;: 523.547265,
+    &quot;med&quot;: 88.776638,
+    &quot;min&quot;: 1.132838,
+    &quot;p(90)&quot;: 190.14717480000002,
+    &quot;p(95)&quot;: 220.8751434,
+    &quot;thresholds&quot;: {
+      &quot;p(95)&lt;500&quot;: false
+    }
+  },
+  &quot;http_req_duration{expected_response:true}&quot;: {
+    &quot;avg&quot;: 101.22527081641445,
+    &quot;max&quot;: 523.547265,
+    &quot;med&quot;: 88.776638,
+    &quot;min&quot;: 1.132838,
+    &quot;p(90)&quot;: 190.14717480000002,
+    &quot;p(95)&quot;: 220.8751434
+  },
+  &quot;http_req_failed&quot;: {
+    &quot;fails&quot;: 9565,
+    &quot;passes&quot;: 0,
+    &quot;thresholds&quot;: {
+      &quot;rate&lt;0.01&quot;: false
+    },
+    &quot;value&quot;: 0
+  },
+  &quot;http_req_receiving&quot;: {
+    &quot;avg&quot;: 1.181428313434398,
+    &quot;max&quot;: 52.772103,
+    &quot;med&quot;: 0.051648,
+    &quot;min&quot;: 0.009147,
+    &quot;p(90)&quot;: 2.574860800000009,
+    &quot;p(95)&quot;: 7.596306999999997
+  },
+  &quot;http_req_sending&quot;: {
+    &quot;avg&quot;: 0.132887940825928,
+    &quot;max&quot;: 29.475641,
+    &quot;med&quot;: 0.015965,
+    &quot;min&quot;: 0.003921,
+    &quot;p(90)&quot;: 0.04135580000000001,
+    &quot;p(95)&quot;: 0.11011679999999999
+  },
+  &quot;http_req_tls_handshaking&quot;: {
+    &quot;avg&quot;: 0,
+    &quot;max&quot;: 0,
+    &quot;med&quot;: 0,
+    &quot;min&quot;: 0,
+    &quot;p(90)&quot;: 0,
+    &quot;p(95)&quot;: 0
+  },
+  &quot;http_req_waiting&quot;: {
+    &quot;avg&quot;: 99.91095456215339,
+    &quot;max&quot;: 523.471674,
+    &quot;med&quot;: 87.804918,
+    &quot;min&quot;: 1.102458,
+    &quot;p(90)&quot;: 187.5147334,
+    &quot;p(95)&quot;: 217.8314816
+  },
+  &quot;http_reqs&quot;: {
+    &quot;count&quot;: 9565,
+    &quot;rate&quot;: 474.5554312154615
+  },
+  &quot;iteration_duration&quot;: {
+    &quot;avg&quot;: 104.86977664788274,
+    &quot;max&quot;: 561.562286,
+    &quot;med&quot;: 89.76999,
+    &quot;min&quot;: 1.231191,
+    &quot;p(90)&quot;: 202.44236240000006,
+    &quot;p(95)&quot;: 233.2737886
+  },
+  &quot;iterations&quot;: {
+    &quot;count&quot;: 9565,
+    &quot;rate&quot;: 474.5554312154615
+  },
+  &quot;vus&quot;: {
+    &quot;max&quot;: 50,
+    &quot;min&quot;: 50,
+    &quot;value&quot;: 50
+  },
+  &quot;vus_max&quot;: {
+    &quot;max&quot;: 50,
+    &quot;min&quot;: 50,
+    &quot;value&quot;: 50
+  }
+}</pre>
+</body>
+</html>

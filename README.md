@@ -59,13 +59,20 @@ Then it either **forwards**, **audits**, or **blocks** the request.
 
 ### Download a release
 
-Prebuilt Linux binaries (`amd64`/`arm64`) are published on the
+Prebuilt binaries are published on the
 [Releases](https://github.com/imposeCosts/graphql-waf/releases) page for every tagged version,
-built by `.github/workflows/release.yml`. Each release includes `graphql-waf`,
-`dvga-like-server` (the local test upstream), and a `SHA256SUMS.txt` to verify the download.
+built by `.github/workflows/release.yml`, covering:
+
+- Linux: `amd64`, `arm64`
+- macOS: `amd64`, `arm64`
+- Windows: `amd64` (`.exe`)
+- FreeBSD / OpenBSD / NetBSD: `amd64`
+
+Each release includes `graphql-waf`, `dvga-like-server` (the local test upstream), and a
+`SHA256SUMS.txt` to verify the download.
 
 ```bash
-# pick the arch matching your machine
+# pick the asset matching your OS/arch, e.g. graphql-waf-linux-amd64
 curl -fsSL -o graphql-waf \
   https://github.com/imposeCosts/graphql-waf/releases/latest/download/graphql-waf-linux-amd64
 curl -fsSL -o SHA256SUMS.txt \
@@ -153,6 +160,60 @@ CPU-ish work (server-side compute stress):
 ```graphql
 query { fib(n: 42) }
 ```
+
+### Perf report
+
+```bash
+make perf-k6
+```
+
+Builds the WAF (release mode by default — `RELEASE=0` for a faster debug build), starts the
+upstream + WAF, runs the `mixed`-mode k6 load test above, and writes an HTML/PDF report to
+[`docs/perf-report.html`](docs/perf-report.html) / `docs/perf-report.pdf`. Unlike the raw
+`reports/` output (gitignored — see `K6_SUMMARY_JSON`), the report path is tracked in git and
+overwritten in place on each run, so `git diff` on it shows how the latest numbers changed.
+Pass `K6_REPORT=0` to skip report generation (used automatically by the `perf-k6-*-block`
+smoke-test variants below, which run 1-VU/2s checks and shouldn't clobber it). Requires
+`wkhtmltopdf` (`make wkhtmltopdf-install`) for the PDF; run `make help` for all `K6_*` variables.
+
+### Scaling up VUs
+
+The default `K6_VUS=50` is a light load. For more, either override it directly
+(`make perf-k6 K6_VUS=200 K6_DURATION=60s`) or use:
+
+```bash
+make perf-k6-large   # K6_LARGE_VUS=500 K6_LARGE_DURATION=60s by default
+```
+
+which also sets `K6_DISCARD_BODIES=true` and raises this shell's open-file limit
+(`K6_ULIMIT=1`), and writes its own tracked report —
+[`docs/perf-report-large.html`](docs/perf-report-large.html) / `docs/perf-report-large.pdf` —
+kept separate from `docs/perf-report.html`/`.pdf` so a 500-VU stress run doesn't overwrite the
+`make perf-k6` baseline numbers. A few things to know before going much higher, per
+[k6's guide on running large tests](https://grafana.com/docs/k6/latest/testing-guides/running-large-tests/):
+
+- **This is a same-machine test.** k6, the WAF, and the upstream all run on your box and compete
+  for the same CPU cores and loopback network stack — unlike the guide's target scenario (a
+  dedicated k6 client hammering a separate remote system), so its headline "30k-40k VUs per
+  instance" figure doesn't translate directly here. `K6_LARGE_VUS=500` is a starting point to dial
+  up or down from, not a target. Watch CPU: keep some idle headroom rather than driving the box to
+  100%, or your numbers reflect contention, not proxy overhead.
+- **File descriptors run out before CPU does**, once VUs climb into the hundreds/thousands — each
+  VU holds open TCP sockets. If you see `socket: too many open files`, that's what `K6_ULIMIT=1`
+  (`perf-k6-large`'s default) works around; set it on a plain `perf-k6` run too if needed.
+- **`K6_DISCARD_BODIES=true`** drops response-body handling client-side, cutting k6's own memory/
+  CPU overhead — useful once you're VU-bound rather than target-bound and want cleaner req/s
+  numbers. Trade-off: the load test script's `"has data or errors"` check parses the response body,
+  so with bodies discarded that check always reports failed — expected, not a sign the WAF is
+  broken; only `http_req_failed`/`http_req_duration` (the configured thresholds) still mean
+  anything with this flag on.
+- **`K6_TIMEOUT`** (per-request HTTP timeout, default `30s`) needs an explicit unit — `K6_TIMEOUT=60`
+  is parsed as **60 milliseconds**, not 60 seconds, and will time out nearly every request. Use
+  `K6_TIMEOUT=60s`.
+- For genuinely large runs the guide also covers OS-level TCP tuning (`net.ipv4.ip_local_port_range`,
+  `tcp_tw_reuse`) and `--no-thresholds`/`--no-summary` k6 flags to cut client-side overhead further
+  — not applied here since they're system-wide `sysctl` changes, not something to flip on by
+  default in a repo Makefile.
 
 ### Example
 

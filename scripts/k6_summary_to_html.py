@@ -55,13 +55,22 @@ def main() -> int:
     iterations = metric_values("iterations")
     http_req_failed = metric_values("http_req_failed")
 
-    # Some k6 exports store http_req_failed as {passes,fails,value} without "rate".
+    # Some k6 exports store http_req_failed as {passes,fails,value} without a top-level "rate".
+    # "passes"/"fails" count `true`/`false` boolean samples (generic to all Rate metrics, e.g.
+    # `checks`) -- for http_req_failed a `true` sample means the request failed, so the rate is
+    # passes / total, not fails / total. Prefer the already-computed "value" when present since
+    # it's exactly this rate; only fall back to passes/fails on older k6 exports lacking it.
     if "rate" not in http_req_failed:
-        fails = http_req_failed.get("fails")
-        passes = http_req_failed.get("passes")
-        if isinstance(fails, (int, float)) and isinstance(passes, (int, float)) and (fails + passes) > 0:
+        value = http_req_failed.get("value")
+        if isinstance(value, (int, float)):
             http_req_failed = dict(http_req_failed)
-            http_req_failed["rate"] = fails / (fails + passes)
+            http_req_failed["rate"] = value
+        else:
+            fails = http_req_failed.get("fails")
+            passes = http_req_failed.get("passes")
+            if isinstance(fails, (int, float)) and isinstance(passes, (int, float)) and (fails + passes) > 0:
+                http_req_failed = dict(http_req_failed)
+                http_req_failed["rate"] = passes / (fails + passes)
 
     def fmt(v):
         if v is None:

@@ -12,15 +12,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      tag_exists: ${{ steps.tag.outputs.exists }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@1.94.1
-      - uses: Swatinem/rust-cache@v2
 
       - name: Derive version (root Cargo.toml)
         id: version
@@ -40,15 +43,23 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build release binaries (linux-amd64)
-        if: steps.tag.outputs.exists != 'true'
+  # linux-amd64 (native) + linux-arm64 (QEMU via run-on-arch-action).
+  build-linux:
+    needs: version
+    if: needs.version.outputs.tag_exists != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (linux-amd64)
         run: |
           set -euo pipefail
           cargo build --release --all-features
           cargo build --release --all-features --manifest-path dvga-like-server/Cargo.toml
 
-      - name: Build release binaries (linux-arm64)
-        if: steps.tag.outputs.exists != 'true'
+      - name: Build (linux-arm64)
         uses: uraimo/run-on-arch-action@v2
         with:
           arch: aarch64
@@ -69,7 +80,6 @@ jobs:
             cargo build --release --all-features --manifest-path dvga-like-server/Cargo.toml
 
       - name: Package artifacts
-        if: steps.tag.outputs.exists != 'true'
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -77,12 +87,217 @@ jobs:
           cp dvga-like-server/target/release/dvga-like-server "dist/dvga-like-server-linux-amd64"
           cp target-arm64/release/graphql-waf "dist/graphql-waf-linux-arm64"
           cp target-arm64/release/dvga-like-server "dist/dvga-like-server-linux-arm64"
-          (cd dist && sha256sum * > SHA256SUMS.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/*
+          retention-days: 7
+
+  # macOS: GitHub no longer offers a plain (free-tier) Intel macOS runner label, only Apple
+  # Silicon (macos-14+) plus paid "-intel" large-runner SKUs. So instead of two OS-matrix
+  # runners, this builds both archs on a single macos-14 (Apple Silicon) runner by
+  # cross-compiling x86_64-apple-darwin -- Xcode's bundled toolchain links that target natively
+  # from an arm64 host, no Rosetta or separate SDK download needed.
+  build-macos:
+    needs: version
+    if: needs.version.outputs.tag_exists != 'true'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --all-features --target "$target"
+            cargo build --release --all-features --target "$target" --manifest-path dvga-like-server/Cargo.toml
+          done
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/aarch64-apple-darwin/release/graphql-waf "dist/graphql-waf-macos-arm64"
+          cp dvga-like-server/target/aarch64-apple-darwin/release/dvga-like-server "dist/dvga-like-server-macos-arm64"
+          cp target/x86_64-apple-darwin/release/graphql-waf "dist/graphql-waf-macos-amd64"
+          cp dvga-like-server/target/x86_64-apple-darwin/release/dvga-like-server "dist/dvga-like-server-macos-amd64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/*
+          retention-days: 7
+
+  build-windows:
+    needs: version
+    if: needs.version.outputs.tag_exists != 'true'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          cargo build --release --all-features
+          cargo build --release --all-features --manifest-path dvga-like-server/Cargo.toml
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/release/graphql-waf.exe "dist/graphql-waf-windows-amd64.exe"
+          cp dvga-like-server/target/release/dvga-like-server.exe "dist/dvga-like-server-windows-amd64.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/*
+          retention-days: 7
+
+  # BSD targets: GitHub has no native BSD runners, so these boot a real VM (via QEMU/bhyve) on
+  # an ubuntu-latest host using vmactions, install a minimal rustup toolchain inside it, and
+  # build there. Slower (VM boot/setup overhead) and less battle-tested than the native runners
+  # above -- if a package name below is wrong for the image's current release, this job (and
+  # thus the whole release, since `release` below needs every build-* job) will fail closed
+  # rather than silently publishing without that platform. Adjust package names as needed if
+  # the first real run hits a mismatch.
+  build-freebsd:
+    needs: version
+    if: needs.version.outputs.tag_exists != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y curl pkgconf openssl
+          run: |
+            set -euo pipefail
+            curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.94.1
+            . "$HOME/.cargo/env"
+            cargo build --release --all-features
+            cargo build --release --all-features --manifest-path dvga-like-server/Cargo.toml
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/release/graphql-waf "dist/graphql-waf-freebsd-amd64"
+          cp dvga-like-server/target/release/dvga-like-server "dist/dvga-like-server-freebsd-amd64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-freebsd
+          path: dist/*
+          retention-days: 7
+
+  build-openbsd:
+    needs: version
+    if: needs.version.outputs.tag_exists != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build in OpenBSD VM
+        uses: vmactions/openbsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg_add curl
+          run: |
+            set -euo pipefail
+            curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.94.1
+            . "$HOME/.cargo/env"
+            cargo build --release --all-features
+            cargo build --release --all-features --manifest-path dvga-like-server/Cargo.toml
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/release/graphql-waf "dist/graphql-waf-openbsd-amd64"
+          cp dvga-like-server/target/release/dvga-like-server "dist/dvga-like-server-openbsd-amd64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-openbsd
+          path: dist/*
+          retention-days: 7
+
+  build-netbsd:
+    needs: version
+    if: needs.version.outputs.tag_exists != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build in NetBSD VM
+        uses: vmactions/netbsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkgin -y install curl pkgconf openssl
+          run: |
+            set -euo pipefail
+            curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.94.1
+            . "$HOME/.cargo/env"
+            cargo build --release --all-features
+            cargo build --release --all-features --manifest-path dvga-like-server/Cargo.toml
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/release/graphql-waf "dist/graphql-waf-netbsd-amd64"
+          cp dvga-like-server/target/release/dvga-like-server "dist/dvga-like-server-netbsd-amd64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-netbsd
+          path: dist/*
+          retention-days: 7
+
+  release:
+    needs:
+      - version
+      - build-linux
+      - build-macos
+      - build-windows
+      - build-freebsd
+      - build-openbsd
+      - build-netbsd
+    if: needs.version.outputs.tag_exists != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: (cd dist && sha256sum * > SHA256SUMS.txt)
 
       - name: Create and push git tag
-        if: steps.tag.outputs.exists != 'true'
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -91,14 +306,8 @@ jobs:
           git push origin "refs/tags/$TAG"
 
       - name: Create GitHub Release
-        if: steps.tag.outputs.exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
+          tag_name: ${{ needs.version.outputs.tag }}
           generate_release_notes: true
-          files: |
-            dist/graphql-waf-linux-amd64
-            dist/graphql-waf-linux-arm64
-            dist/dvga-like-server-linux-amd64
-            dist/dvga-like-server-linux-arm64
-            dist/SHA256SUMS.txt
+          files: dist/*

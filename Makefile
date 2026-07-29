@@ -1,15 +1,37 @@
-.PHONY: help build run run-dev fmt clippy test clean semgrep-install semgrep k6-install wkhtmltopdf-install k6-report upstream-run waf-run perf-k6 perf-k6-introspection-block perf-k6-batch-block perf-k6-depth-block perf-k6-aliases-block perf-k6-directives-block perf-k6-max-query-bytes-block perf-k6-cost-block perf-k6-fragment-amplification-block gotestwaf-pull gotestwaf-scan gotestwaf-scan-owasp gotestwaf-scan-owasp-api gotestwaf-scan-custom gotestwaf-scan-graphql run-dev-gotestwaf-graphql
+.PHONY: help build run run-dev fmt clippy test clean semgrep-install semgrep k6-install wkhtmltopdf-install k6-report upstream-run waf-run perf-k6 perf-k6-large perf-k6-introspection-block perf-k6-batch-block perf-k6-depth-block perf-k6-aliases-block perf-k6-directives-block perf-k6-max-query-bytes-block perf-k6-cost-block perf-k6-fragment-amplification-block gotestwaf-pull gotestwaf-scan gotestwaf-scan-owasp gotestwaf-scan-owasp-api gotestwaf-scan-custom gotestwaf-scan-graphql run-dev-gotestwaf-graphql
 
 WAF_URL ?= http://127.0.0.1:8080
 UPSTREAM_URL ?= http://127.0.0.1:4000
 K6_SCRIPT ?= k6/graphql_loadtest.js
 K6_BASE_URL ?= $(WAF_URL)
-K6_VUS ?= 20
+K6_VUS ?= 50
 K6_DURATION ?= 20s
 K6_MODE ?= mixed
 K6_SUMMARY_JSON ?= reports/k6-summary.json
-K6_REPORT_HTML ?= reports/k6-report.html
-K6_REPORT_PDF ?= reports/k6-report.pdf
+# Unlike K6_SUMMARY_JSON (raw, gitignored run output under reports/), the HTML/PDF report is
+# written to a fixed, tracked path under docs/ and is meant to be committed: each `make perf-k6`
+# run overwrites it in place, so git history shows the diff of the latest perf numbers rather than
+# accumulating dated report files.
+K6_REPORT_HTML ?= docs/perf-report.html
+K6_REPORT_PDF ?= docs/perf-report.pdf
+# Set to 0 to skip HTML/PDF report generation (used by the perf-k6-*-block smoke-test variants,
+# which run tiny 1-VU/2s checks and shouldn't clobber the tracked perf-report with those numbers).
+K6_REPORT ?= 1
+# Set to 1 to raise the shell's open-file-descriptor limit before running k6 (see
+# https://grafana.com/docs/k6/latest/testing-guides/running-large-tests/ -- past a few hundred
+# VUs, "socket: too many open files" shows up before CPU becomes the bottleneck). Only affects
+# this invocation's shell, not the system. Used automatically by perf-k6-large.
+K6_ULIMIT ?= 0
+# Defaults for `make perf-k6-large` (see the "Scaling up VUs" section in README.md). This is
+# still a same-machine test (k6, the WAF, and the upstream all share this box's CPU/network
+# stack), so treat these as a starting point to push past the K6_VUS=50 default, not as a
+# literal reproduction of the linked guide's remote-target sizing (30k-40k VUs/instance).
+K6_LARGE_VUS ?= 500
+K6_LARGE_DURATION ?= 60s
+# Separate tracked report path for perf-k6-large, so a 500-VU stress run doesn't overwrite the
+# K6_VUS=50 baseline numbers in K6_REPORT_HTML/K6_REPORT_PDF.
+K6_LARGE_REPORT_HTML ?= docs/perf-report-large.html
+K6_LARGE_REPORT_PDF ?= docs/perf-report-large.pdf
 WAF_ARGS ?= --listen-host 127.0.0.1 --listen-port 8080 --mode off
 # Defaults for `make run-dev` (blocks using all GraphQL protections + limits).
 RUN_DEV_WAF_ARGS ?= --listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-block-non-graphql-paths --block-introspection --block-graphql-batch --graphql-max-query-bytes 8192 --graphql-max-depth 20 --graphql-max-aliases 50 --graphql-max-directives 50 --graphql-max-cost 200
@@ -50,8 +72,9 @@ help:
 	@echo "  make upstream-run       Run local GraphQL upstream on :4000"
 	@echo "  make waf-run            Run WAF proxying to upstream"
 	@echo "  make run-dev            Run upstream + WAF (dev loop)"
-	@echo "  make perf-k6            Run upstream + WAF + k6 load test"
-	@echo "  make k6-report          Run perf-k6 and export PDF report"
+	@echo "  make perf-k6            Run upstream + WAF + k6 load test, writes $(K6_REPORT_HTML)/$(K6_REPORT_PDF) (K6_REPORT=0 to skip)"
+	@echo "  make k6-report          Alias for perf-k6 (kept for back-compat)"
+	@echo "  make perf-k6-large      Higher-load run (K6_LARGE_VUS=$(K6_LARGE_VUS)), writes $(K6_LARGE_REPORT_HTML)/$(K6_LARGE_REPORT_PDF)"
 	@echo "  make perf-k6-introspection-block  Verify introspection is blocked"
 	@echo "  make perf-k6-batch-block          Verify GraphQL batch is blocked"
 	@echo "  make perf-k6-depth-block          Verify depth limit blocks"
@@ -79,8 +102,15 @@ help:
 	@echo "  K6_VUS=$(K6_VUS)"
 	@echo "  K6_DURATION=$(K6_DURATION)"
 	@echo "  K6_MODE=$(K6_MODE)                (ping|nested|biglist|fib|introspection|batch|depth|aliases|directives|max_query_bytes|cost|fragment_amplification|ratelimit|auth_bypass|mixed)"
+	@echo "  K6_TIMEOUT=30s                 (per-request HTTP timeout; needs a unit, e.g. 60s -- a bare"
+	@echo "                                  number like 60 is parsed as 60ms and every request times out)"
 	@echo "  K6_SUMMARY_JSON=$(K6_SUMMARY_JSON)"
+	@echo "  K6_REPORT=$(K6_REPORT)                    (1 to write K6_REPORT_HTML/K6_REPORT_PDF, 0 to skip)"
+	@echo "  K6_REPORT_HTML=$(K6_REPORT_HTML)"
 	@echo "  K6_REPORT_PDF=$(K6_REPORT_PDF)"
+	@echo "  K6_ULIMIT=$(K6_ULIMIT)                     (1 to raise this shell's open-file limit before running k6)"
+	@echo "  K6_DISCARD_BODIES=false        (true to skip response bodies client-side; cuts k6's own overhead)"
+	@echo "  K6_LARGE_VUS=$(K6_LARGE_VUS) K6_LARGE_DURATION=$(K6_LARGE_DURATION)  (defaults used by perf-k6-large)"
 	@echo "  WAF_ARGS='$(WAF_ARGS)'            (extra args passed to WAF)"
 	@echo "  RUN_DEV_WAF_ARGS='$(RUN_DEV_WAF_ARGS)' (default args used by run-dev)"
 	@echo "  GTW_BLOCK_STATUS=400           (status code used when blocking)"
@@ -240,64 +270,83 @@ perf-k6:
 		"$$waf_bin" --upstream "$(UPSTREAM_URL)" $$waf_threads_arg $(WAF_ARGS) >/tmp/graphql-waf.log 2>&1 & waf_pid="$$!"; \
 		trap "kill $$waf_pid $$up_pid >/dev/null 2>&1 || true" EXIT INT TERM; \
 		sleep 0.5; \
+		if [[ "$(K6_ULIMIT)" == "1" ]]; then \
+			before="$$(ulimit -n)"; \
+			ulimit -n 250000 2>/dev/null || ulimit -n "$$(ulimit -Hn)" 2>/dev/null || true; \
+			echo "Raised open-file limit: $$before -> $$(ulimit -n)"; \
+		fi; \
 		echo "Running k6 (script: $(K6_SCRIPT))"; \
 		mkdir -p "$(REPORT_DIR)"; \
 		K6_BASE_URL="$(K6_BASE_URL)" K6_VUS="$(K6_VUS)" K6_DURATION="$(K6_DURATION)" K6_MODE="$(K6_MODE)" \
 			k6 run --summary-export "$(K6_SUMMARY_JSON)" "$(K6_SCRIPT)"; \
+		if [[ "$(K6_REPORT)" == "1" ]]; then \
+			command -v python3 >/dev/null 2>&1 || { echo "python3 is required to build the HTML report"; exit 2; }; \
+			mkdir -p "$$(dirname "$(K6_REPORT_HTML)")"; \
+			python3 scripts/k6_summary_to_html.py "$(K6_SUMMARY_JSON)" "$(K6_REPORT_HTML)"; \
+			echo "Wrote $(K6_REPORT_HTML)"; \
+			command -v wkhtmltopdf >/dev/null 2>&1 || { echo "wkhtmltopdf is required (run: make wkhtmltopdf-install)"; exit 2; }; \
+			wkhtmltopdf --quiet "$(K6_REPORT_HTML)" "$(K6_REPORT_PDF)"; \
+			echo "Wrote $(K6_REPORT_PDF)"; \
+		fi; \
 		echo "Done." \
 	'
 
+# Alias retained for discoverability/back-compat: perf-k6 now generates the HTML/PDF report
+# itself by default (K6_REPORT=1), so this is equivalent to a plain `make perf-k6`.
 k6-report: RELEASE ?= 1
-k6-report:
-	@bash -lc '\
-		set -euo pipefail; \
-		$(MAKE) perf-k6; \
-		command -v python3 >/dev/null 2>&1 || { echo "python3 is required to build the HTML report"; exit 2; }; \
-		python3 scripts/k6_summary_to_html.py "$(K6_SUMMARY_JSON)" "$(K6_REPORT_HTML)"; \
-		command -v wkhtmltopdf >/dev/null 2>&1 || { echo "wkhtmltopdf is required (run: make wkhtmltopdf-install)"; exit 2; }; \
-		wkhtmltopdf --quiet "$(K6_REPORT_HTML)" "$(K6_REPORT_PDF)"; \
-		echo "Wrote $(K6_REPORT_PDF)"; \
-	'
+k6-report: perf-k6
+
+# Opt-in higher-load run: see "Scaling up VUs" in README.md. Still a same-machine test (k6, the
+# WAF, and the upstream all share this box), so K6_LARGE_VUS is a starting point to push past the
+# default, not a literal target VU count -- watch CPU/fd usage and dial K6_LARGE_VUS down if you
+# see contention (high latency across the board) or up if there's idle headroom. Writes its own
+# tracked report (K6_LARGE_REPORT_HTML/PDF, separate from K6_REPORT_HTML/PDF) so a 500-VU stress
+# run doesn't overwrite the K6_VUS=50 baseline numbers from a plain `make perf-k6`.
+perf-k6-large: RELEASE ?= 1
+perf-k6-large:
+	@$(MAKE) perf-k6 K6_VUS=$(K6_LARGE_VUS) K6_DURATION=$(K6_LARGE_DURATION) \
+		K6_DISCARD_BODIES=true K6_ULIMIT=1 \
+		K6_REPORT_HTML=$(K6_LARGE_REPORT_HTML) K6_REPORT_PDF=$(K6_LARGE_REPORT_PDF)
 
 perf-k6-introspection-block: RELEASE ?= 1
 perf-k6-introspection-block:
 	@$(MAKE) perf-k6 K6_MODE=introspection K6_VUS=1 K6_DURATION=2s \
-		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --block-introspection'
+		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --block-introspection' K6_REPORT=0
 
 perf-k6-batch-block: RELEASE ?= 1
 perf-k6-batch-block:
 	@$(MAKE) perf-k6 K6_MODE=batch K6_VUS=1 K6_DURATION=2s \
-		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --block-graphql-batch'
+		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --block-graphql-batch' K6_REPORT=0
 
 perf-k6-depth-block: RELEASE ?= 1
 perf-k6-depth-block:
 	@$(MAKE) perf-k6 K6_MODE=depth K6_VUS=1 K6_DURATION=2s \
-		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-depth 3'
+		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-depth 3' K6_REPORT=0
 
 perf-k6-aliases-block: RELEASE ?= 1
 perf-k6-aliases-block:
 	@$(MAKE) perf-k6 K6_MODE=aliases K6_VUS=1 K6_DURATION=2s \
-		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-aliases 1'
+		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-aliases 1' K6_REPORT=0
 
 perf-k6-directives-block: RELEASE ?= 1
 perf-k6-directives-block:
 	@$(MAKE) perf-k6 K6_MODE=directives K6_VUS=1 K6_DURATION=2s \
-		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-directives 1'
+		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-directives 1' K6_REPORT=0
 
 perf-k6-max-query-bytes-block: RELEASE ?= 1
 perf-k6-max-query-bytes-block:
 	@$(MAKE) perf-k6 K6_MODE=max_query_bytes K6_VUS=1 K6_DURATION=2s K6_PAD=200 \
-		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-query-bytes 10'
+		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-query-bytes 10' K6_REPORT=0
 
 perf-k6-cost-block: RELEASE ?= 1
 perf-k6-cost-block:
 	@$(MAKE) perf-k6 K6_MODE=cost K6_VUS=1 K6_DURATION=2s \
-		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-cost 5'
+		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-cost 5' K6_REPORT=0
 
 perf-k6-fragment-amplification-block: RELEASE ?= 1
 perf-k6-fragment-amplification-block:
 	@$(MAKE) perf-k6 K6_MODE=fragment_amplification K6_VUS=1 K6_DURATION=2s \
-		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-cost 5'
+		WAF_ARGS='--listen-host 127.0.0.1 --listen-port 8080 --mode block --graphql-security --graphql-max-cost 5' K6_REPORT=0
 
 fmt:
 	cargo fmt

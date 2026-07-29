@@ -5,7 +5,7 @@ const BASE_URL = __ENV.K6_BASE_URL || "http://127.0.0.1:8080";
 const GRAPHQL_URL = `${BASE_URL.replace(/\/$/, "")}/graphql`;
 
 export const options = {
-  vus: Number(__ENV.K6_VUS || 20),
+  vus: Number(__ENV.K6_VUS || 50),
   duration: __ENV.K6_DURATION || "20s",
   // For max req/s measurements, set K6_DISCARD_BODIES=true to reduce client overhead.
   discardResponseBodies: __ENV.K6_DISCARD_BODIES === "true",
@@ -27,7 +27,12 @@ function gql(query, variables = {}, expectedStatus = 200, expectWafBlocked = fal
   check(res, {
     [`status is ${expectedStatus}`]: (r) => r.status === expectedStatus,
     "has data or errors": (r) => {
-      if (__ENV.K6_SKIP_JSON_CHECK === "true") return true;
+      // When discardResponseBodies is on (K6_DISCARD_BODIES=true, used by perf-k6-large to cut
+      // client overhead at high VU counts), k6 gives back r.body === null for every response, so
+      // r.json() has nothing to parse and this check would always fail regardless of what the
+      // server actually returned. Skip it in that case -- the status check still verifies the
+      // response succeeded.
+      if (__ENV.K6_SKIP_JSON_CHECK === "true" || r.body === null) return true;
       try {
         const j = r.json();
         return j && (j.data || j.errors);
