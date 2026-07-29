@@ -169,7 +169,7 @@ make perf-k6
 
 Builds the WAF (release mode by default — `RELEASE=0` for a faster debug build), starts the
 upstream + WAF, runs the `mixed`-mode k6 load test above, and writes an HTML/PDF report to
-[`docs/perf-report.html`](docs/perf-report.html) / `docs/perf-report.pdf`. Unlike the raw
+[`docs/perf-report.html`](docs/perf-report.html) / [`docs/perf-report.pdf`](docs/perf-report.pdf). Unlike the raw
 `reports/` output (gitignored — see `K6_SUMMARY_JSON`), the report path is tracked in git and
 overwritten in place on each run, so `git diff` on it shows how the latest numbers changed.
 Pass `K6_REPORT=0` to skip report generation (used automatically by the `perf-k6-*-block`
@@ -187,7 +187,7 @@ make perf-k6-large   # K6_LARGE_VUS=500 K6_LARGE_DURATION=60s by default
 
 which also sets `K6_DISCARD_BODIES=true` and raises this shell's open-file limit
 (`K6_ULIMIT=1`), and writes its own tracked report —
-[`docs/perf-report-large.html`](docs/perf-report-large.html) / `docs/perf-report-large.pdf` —
+[`docs/perf-report-large.html`](docs/perf-report-large.html) / [`docs/perf-report-large.pdf`](docs/perf-report-large.pdf) —
 kept separate from `docs/perf-report.html`/`.pdf` so a 500-VU stress run doesn't overwrite the
 `make perf-k6` baseline numbers. A few things to know before going much higher, per
 [k6's guide on running large tests](https://grafana.com/docs/k6/latest/testing-guides/running-large-tests/):
@@ -203,10 +203,11 @@ kept separate from `docs/perf-report.html`/`.pdf` so a 500-VU stress run doesn't
   (`perf-k6-large`'s default) works around; set it on a plain `perf-k6` run too if needed.
 - **`K6_DISCARD_BODIES=true`** drops response-body handling client-side, cutting k6's own memory/
   CPU overhead — useful once you're VU-bound rather than target-bound and want cleaner req/s
-  numbers. Trade-off: the load test script's `"has data or errors"` check parses the response body,
-  so with bodies discarded that check always reports failed — expected, not a sign the WAF is
-  broken; only `http_req_failed`/`http_req_duration` (the configured thresholds) still mean
-  anything with this flag on.
+  numbers. The load test script's `"has data or errors"` check normally parses the response body,
+  but skips itself (reporting a pass) when bodies are discarded, since there's nothing to parse —
+  it isn't a signal of WAF behavior either way with this flag on; only `http_req_failed`/
+  `http_req_duration` (the configured thresholds) and the plain `status is <code>` check still mean
+  anything here.
 - **`K6_TIMEOUT`** (per-request HTTP timeout, default `30s`) needs an explicit unit — `K6_TIMEOUT=60`
   is parsed as **60 milliseconds**, not 60 seconds, and will time out nearly every request. Use
   `K6_TIMEOUT=60s`.
