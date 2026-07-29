@@ -4,10 +4,15 @@ listen_port = 8080
 upstream = "http://127.0.0.1:4000"
 mode = "block" # off|audit|block
 max_body_bytes = 1048576
+# If true (the default), a body larger than max_body_bytes is blocked in `block` mode instead
+# of being forwarded upstream uninspected. Only disable this if you have legitimate traffic
+# that exceeds max_body_bytes and you've raised max_body_bytes as far as you reasonably can.
+reject_oversized_body = true
 worker_threads = 4
 # Optional
-# modsec_rules = ["rules/modsec-example.conf"]
-# Wirefilter: see rules/wirefilter.example for copy-paste expressions.
+# modsec_rules = ["rules/modsec-example.conf", "rules/modsec-graphql.conf"]
+# Wirefilter: see rules/wirefilter.example and rules/wirefilter-graphql.example for
+# copy-paste expressions.
 # wirefilter = 'http.method == "POST" && http.request.uri.path contains "graphql"'
 
 [graphql]
@@ -18,10 +23,23 @@ block_introspection = true
 # allow_introspection_header = "X-GoTestWAF-Test"
 block_batch = false
 
-# Optional limits (tune for your environment)
-# max_query_bytes = 8192
-# max_depth = 20
-# max_aliases = 50
-# max_directives = 50
-# max_cost = 200
+# Abuse limits: these are unenforced (unlimited) unless set. The values below are a reasonable
+# starting point for a typical CRUD-style API (also used by `make run-dev`/`make waf-run`) --
+# tune them to your schema's actual shape rather than trusting these blindly.
+#
+# max_query_bytes: raise if legitimate persisted queries/documents are larger than this.
+# max_depth: raise for schemas with legitimately deep nesting (e.g. deeply relational data);
+#   each extra level of depth multiplies potential response size, so prefer pairing a higher
+#   depth limit with a lower max_cost rather than raising both freely.
+# max_aliases / max_directives: aliasing and directive-repetition are common batching/DoS
+#   vectors (requesting the same expensive field hundreds of times via aliases); only raise
+#   these if your clients have a legitimate need for many aliases in one query.
+# max_cost: schema-agnostic approximation combining object/scalar counts and depth -- tune
+#   cost_scalar_cost/cost_object_cost/cost_depth_cost_factor below if this schema's fields are
+#   unusually expensive (e.g. fields backed by external calls) rather than uniform reads.
+max_query_bytes = 8192
+max_depth = 20
+max_aliases = 50
+max_directives = 50
+max_cost = 200
 

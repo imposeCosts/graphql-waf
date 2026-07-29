@@ -1,0 +1,38 @@
+# GraphQL-focused wirefilter expressions for graphql-waf
+# -------------------------------------------------------
+# The proxy loads a single `--wirefilter`/`waf.wirefilter` expression, so treat this file as a
+# menu: copy ONE expression (no `#` lines) into your config, or combine multiple conditions with
+# `&&`/`||` into a single expression yourself.
+#
+# Note: the wirefilter scheme (see `src/proxy.rs::build_scheme`) only exposes method, host,
+# user-agent, content-type, path, query string, and a few headers -- it has no visibility into
+# the request body. Body/query-shape enforcement (introspection, depth, aliases, cost, batching)
+# is handled by the dedicated GraphQL security layer (`--graphql-security` and the
+# `--graphql-max-*` flags), not by wirefilter. These expressions are for header/metadata-level
+# defense-in-depth on top of that, not a replacement for it.
+#
+# In block mode, a true expression counts as a WAF match (request is blocked).
+
+# Only enforce extra scrutiny on GraphQL POSTs (pair with ModSecurity/graphql-security for
+# body-level checks). Same as the general example in wirefilter.example.
+http.method == "POST" && http.request.uri.path contains "graphql"
+
+# Reject GraphQL POSTs with a content-type that isn't one of the standard GraphQL transports.
+# Naive scanners/scripts often send `text/plain` or omit content-type entirely.
+# http.request.uri.path contains "graphql" && http.method == "POST" && \
+#   not (http.content_type contains "application/json" || http.content_type contains "application/graphql")
+
+# Flag empty-user-agent requests to the GraphQL endpoint -- a common signal for scripted
+# scanners/bots that don't bother setting a UA at all.
+# http.request.uri.path contains "graphql" && http.user_agent == ""
+
+# Known scanner/tooling user-agent substrings hitting the GraphQL endpoint directly (adjust the
+# list to whatever you've observed in your own logs; this is illustrative, not exhaustive).
+# http.request.uri.path contains "graphql" && \
+#   (http.user_agent contains "sqlmap" || http.user_agent contains "graphql-cop" || http.user_agent contains "InQL")
+
+# Block GraphiQL playground access for anything that arrived via a proxy/load balancer (i.e.
+# has an X-Forwarded-For value at all) as a rough "internal traffic only" approximation --
+# direct/internal callers typically won't have this header set. Not a substitute for real
+# network-level access control (the scheme has no CIDR/IP-range matching on this Bytes field).
+# http.request.uri.path == "/graphiql" && http.request.headers.x_forwarded_for != ""

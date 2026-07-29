@@ -1,0 +1,32 @@
+[package]
+name = "graphql-waf-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bytes = "1"
+http = "0.2"
+hyper = { version = "0.14", default-features = false }
+wirefilter-engine = "0.6"
+
+[dependencies.graphql-waf]
+path = ".."
+
+[[bin]]
+name = "graphql_security"
+path = "fuzz_targets/graphql_security.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wirefilter_expr"
+path = "fuzz_targets/wirefilter_expr.rs"
+test = false
+doc = false
+bench = false

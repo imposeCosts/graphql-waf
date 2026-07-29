@@ -1,4 +1,4 @@
-.PHONY: help build run run-dev fmt clippy clean semgrep-install semgrep k6-install wkhtmltopdf-install k6-report upstream-run waf-run perf-k6 perf-k6-introspection-block perf-k6-batch-block perf-k6-depth-block perf-k6-aliases-block perf-k6-directives-block perf-k6-max-query-bytes-block perf-k6-cost-block gotestwaf-pull gotestwaf-scan gotestwaf-scan-owasp gotestwaf-scan-owasp-api gotestwaf-scan-graphql run-dev-gotestwaf-graphql
+.PHONY: help build run run-dev fmt clippy test clean semgrep-install semgrep k6-install wkhtmltopdf-install k6-report upstream-run waf-run perf-k6 perf-k6-introspection-block perf-k6-batch-block perf-k6-depth-block perf-k6-aliases-block perf-k6-directives-block perf-k6-max-query-bytes-block perf-k6-cost-block gotestwaf-pull gotestwaf-scan gotestwaf-scan-owasp gotestwaf-scan-owasp-api gotestwaf-scan-graphql run-dev-gotestwaf-graphql
 
 WAF_URL ?= http://127.0.0.1:8080
 UPSTREAM_URL ?= http://127.0.0.1:4000
@@ -274,6 +274,10 @@ fmt:
 
 clippy:
 	cargo clippy -- -D warnings
+
+test:
+	cargo test --all-features
+	cargo test --manifest-path dvga-like-server/Cargo.toml --all-features
 
 clean:
 	cargo clean

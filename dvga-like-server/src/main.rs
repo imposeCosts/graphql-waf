@@ -253,9 +253,7 @@ mod tests {
     #[tokio::test]
     async fn big_list_clamps_size_to_50_000() {
         let schema = test_schema();
-        let res = schema
-            .execute("{ bigList(size: 1000000) { id } }")
-            .await;
+        let res = schema.execute("{ bigList(size: 1000000) { id } }").await;
         assert!(res.errors.is_empty(), "{:?}", res.errors);
         let json = serde_json::to_value(res.data).unwrap();
         let list = json["bigList"].as_array().unwrap();
@@ -289,7 +287,10 @@ mod tests {
             assert_eq!(id, expected_depth as i64);
             if expected_depth < levels {
                 node = &node["child"];
-                assert!(!node.is_null(), "expected non-null child at depth {expected_depth}");
+                assert!(
+                    !node.is_null(),
+                    "expected non-null child at depth {expected_depth}"
+                );
             }
         }
     }
