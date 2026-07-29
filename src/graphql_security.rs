@@ -268,6 +268,12 @@ fn is_typename_health_probe(query: &str) -> bool {
 }
 
 pub fn strip_graphql_field_suggestions(json_body: &[u8]) -> Option<Vec<u8>> {
+    // Cheap pre-check before paying for a full JSON parse: the overwhelming majority of
+    // responses are successful (no "errors" key at all), and a full `serde_json::from_slice`
+    // into an owned `Value` tree is expensive for large bodies (e.g. list-shaped responses with
+    // thousands of items). Skip straight past those without parsing anything.
+    memmem::find(json_body, b"\"errors\"")?;
+
     // GraphQL errors are typically shaped like:
     // { "errors": [ { "message": "... Did you mean ...?" , ... } ], "data": ... }
     let mut v: serde_json::Value = serde_json::from_slice(json_body).ok()?;
@@ -1061,6 +1067,25 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
         let msg = v["errors"][0]["message"].as_str().unwrap();
         assert_eq!(msg, "Cannot query field \"foo\" on type \"Query\".");
+    }
+
+    #[test]
+    fn returns_none_for_success_response_with_no_errors_key() {
+        // A success-shaped body with no "errors" key anywhere (e.g. a bigList-style response
+        // with thousands of items) has nothing to strip. This is also the case the cheap
+        // `memmem` pre-check is meant to short-circuit before paying for a full JSON parse --
+        // see the perf investigation in the accompanying plan for the measured before/after.
+        let body = br#"{"data":{"bigList":[{"id":1,"name":"item-1"},{"id":2,"name":"item-2"}]}}"#;
+        assert_eq!(strip_graphql_field_suggestions(body), None);
+    }
+
+    #[test]
+    fn returns_none_for_malformed_body_without_errors_substring() {
+        // Malformed JSON that doesn't even contain the "errors" substring must not panic or
+        // attempt a parse -- the pre-check should reject it immediately, same as a well-formed
+        // body would if it lacked an "errors" key.
+        let body = b"not json at all, and definitely no e-r-r-o-r-s substring here";
+        assert_eq!(strip_graphql_field_suggestions(body), None);
     }
 
     #[test]
