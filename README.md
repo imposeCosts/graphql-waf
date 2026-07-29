@@ -57,6 +57,38 @@ This is a **reverse-proxy WAF**: it listens on `--listen-host/--listen-port`, in
 
 Then it either **forwards**, **audits**, or **blocks** the request.
 
+### Download a release
+
+Prebuilt Linux binaries (`amd64`/`arm64`) are published on the
+[Releases](https://github.com/imposeCosts/graphql-waf/releases) page for every tagged version,
+built by `.github/workflows/release.yml`. Each release includes `graphql-waf`,
+`dvga-like-server` (the local test upstream), and a `SHA256SUMS.txt` to verify the download.
+
+```bash
+# pick the arch matching your machine
+curl -fsSL -o graphql-waf \
+  https://github.com/imposeCosts/graphql-waf/releases/latest/download/graphql-waf-linux-amd64
+curl -fsSL -o SHA256SUMS.txt \
+  https://github.com/imposeCosts/graphql-waf/releases/latest/download/SHA256SUMS.txt
+
+sha256sum -c <(grep graphql-waf-linux-amd64 SHA256SUMS.txt)
+chmod +x graphql-waf
+```
+
+Then run it against a config file (see `waf.example.toml` and the
+[Configuration reference](#configuration-reference) below for all available options):
+
+```bash
+./graphql-waf --config waf.example.toml
+```
+
+CLI flags and environment variables override the config file, so you can layer overrides on top
+of a base config, e.g.:
+
+```bash
+./graphql-waf --config waf.example.toml --listen-port 8443 --mode audit
+```
+
 ## Static analysis (Semgrep)
 
 Install and run Semgrep:
